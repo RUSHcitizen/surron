@@ -1,4 +1,9 @@
-# Cloudflare Pages configuration (static site, no Workers needed).
-name = "voltline"
-pages_build_output_dir = "dist"
-compatibility_date = "2025-01-01"
+# Cloudflare Workers (static assets) configuration. The game is a static site: `npm run build`
+# writes dist/, and `npx wrangler deploy` uploads it as the "surron" Worker's assets.
+# public/_headers (copied into dist/) sets the caching headers for sw.js, index.html and /assets.
+name = "surron"
+compatibility_date = "2025-10-01"
+
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"

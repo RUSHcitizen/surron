@@ -123,30 +123,28 @@ The service worker is only registered in production builds (`npm run build && np
 * **PWA**: manifest, icons, and a service worker that precaches every built asset with a content-hashed cache version, so the
   game works offline after one load.
 
-## Deploying to Cloudflare Pages
+## Deploying to Cloudflare
 
-The build output is a static site in `dist/`. No Workers or server code is needed. `public/_headers` sets `sw.js` and
-`index.html` to no-cache and fingerprinted `/assets/*` to immutable.
+The build output is a static site in `dist/`. `wrangler.toml` deploys it as a Cloudflare **Worker with static assets**
+(Worker name `surron`), with no server code. `public/_headers` sets `sw.js` and `index.html` to no-cache and fingerprinted
+`/assets/*` to immutable.
 
-**Option A — Git integration (recommended)**
-1. Push this repository to GitHub.
-2. In the Cloudflare dashboard, go to **Workers & Pages → Create → Pages → Connect to Git** and select the repo.
-3. Build settings:
-   * Framework preset: **None**
+**Option A — Workers Builds (Git integration)**
+1. In the Cloudflare dashboard, go to **Workers & Pages → Create → Import a repository** and pick this repo.
+2. Build settings:
    * Build command: `npm run build`
-   * Build output directory: `dist`
-   * Environment variable: `NODE_VERSION` = `22`
-4. Deploy. Each push to the production branch redeploys; other branches get preview URLs. The relative base path (`base: './'`)
-   works on `*.pages.dev`, custom domains, and preview URLs.
+   * Deploy command: `npx wrangler deploy`
+   * Root directory: `/`
+3. Each push to the connected branch rebuilds and redeploys. The site is served at `https://surron.<your-subdomain>.workers.dev`.
+   The relative base path (`base: './'`) also works on custom domains and preview URLs.
+
+If you rename the Worker in the dashboard, change `name` in `wrangler.toml` to match.
 
 **Option B — Direct upload with Wrangler**
 ```bash
 npx wrangler login
-npm run deploy        # = npm run build && npx wrangler pages deploy dist --project-name voltline
+npm run deploy        # = npm run build && npx wrangler deploy
 ```
-
-> This project has **not** been deployed by me. I didn't have Cloudflare credentials. Follow either option above;
-> afterwards, verify with the checklist below.
 
 ## Install on iPhone (Add to Home Screen)
 

@@ -14,7 +14,7 @@
     "test:e2e": "playwright test",
     "icons": "node scripts/gen-icons.mjs",
     "lab": "vitest run --config tools/vitest.lab.config.ts --reporter=verbose",
-    "deploy": "npm run build && npx wrangler pages deploy dist --project-name voltline"
+    "deploy": "npm run build && npx wrangler deploy"
   },
   "dependencies": {
     "three": "0.180.0"
