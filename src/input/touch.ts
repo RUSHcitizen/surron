@@ -251,7 +251,8 @@ export class TouchControls {
       else if (this.rects) {
         const r = this.rects.throttle;
         const f = 1 - (p.y - r.top) / r.height;
-        thr = Math.max(thr, Math.max(0.35, Math.min(1, 0.35 + f * 0.9)));
+        // Bottom of the pad = gentle (45%), anywhere in the upper half = full throttle.
+        thr = Math.max(thr, Math.max(0.45, Math.min(1, 0.45 + f * 1.1)));
       }
     }
     t.throttle = thr;

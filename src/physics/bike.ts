@@ -117,6 +117,8 @@ export class BikeDynamics {
   riderShift = 0;
   riderLat = 0;
   input: BikeInput = emptyInput();
+  /** Lean the rider can hold right now (grip, speed), rad. */
+  maxLeanNow = 0.8;
   /** How long the wheelie / stoppie buttons have been held, s. */
   wheelieHold = 0;
   stoppieHold = 0;
@@ -381,6 +383,7 @@ export class BikeDynamics {
     // Grip-limited lean: with assist the rider keeps a safety margin; at zero assist you can
     // ask for more lean than the tires can hold (and lowside).
     maxLean = Math.min(maxLean, Math.atan(mu * lerp(1.05, 0.78, this.assist)));
+    this.maxLeanNow = maxLean;
     const L = sp.wheelbase;
     const vv = Math.max(av, 1);
     const wDirect = 1 - smoothstep(T.directSpeed, T.blendSpeed, av);
@@ -489,6 +492,17 @@ export class BikeDynamics {
         const leanErr = clamp(this.lean - leanT, -0.6, 0.6);
         _tmp.copy(_hf).multiplyScalar(-(k * leanErr + d * leanRate) * clamp(upright * 2, 0, 1));
         torque.add(_tmp);
+        // Save: when the bike falls past the lean the rider can hold (tucking the front, a dab of
+        // the knee or foot), the rider fights it back up. Strength scales with assist; at 0 assist
+        // nothing catches you.
+        const holdLean = this.maxLeanNow + 0.08;
+        const over = Math.abs(this.lean) - holdLean;
+        if (over > 0 && this.assist > 0) {
+          const kc = A.catchStiffness * this.assist * (1 + over * 6);
+          const falling = Math.sign(this.lean) * leanRate > 0 ? leanRate : 0;
+          _tmp.copy(_hf).multiplyScalar(-Math.sign(this.lean) * kc * over - A.catchDamping * this.assist * falling);
+          torque.add(_tmp);
+        }
         // Slide control: past ~20° of rear slip the rider's body-English and feel resist further
         // rotation, which makes drifts catchable. Below that, grip riding is untouched.
         const slideW = smoothstep(0.22, 0.75, Math.abs(this.rear.slipAngle)) * smoothstep(1.5, 5, av);
@@ -816,8 +830,18 @@ export class BikeDynamics {
       _tmp.multiplyScalar(-fr).addScaledVector(n, Fn);
       this.applyForce(_tmp, p, force, torque);
       touching = true;
-      if (crashProbe && depth > 0.012) crashHit = name;
-      if (!crashProbe && -vn > 7 * sp.toughness && name.startsWith('tire')) crashHit = name;
+      // A rider-body contact is a crash when it is a real impact (or the bike is lying down).
+      // Gentle touches (a bar end brushing a bank, a slow tip at walking pace) are a dab.
+      if (crashProbe && depth > 0.012) {
+        // Head-on speed into the surface counts fully; sliding along it (a bar end scraping a
+        // wall) much less.
+        const impact = Math.max(-vn, vt * 0.2);
+        const lying = Math.abs(this.lean) > 1.0 || _up.y < 0.35;
+        const limit = lerp(1.2, 5.5, this.assist) * sp.toughness;
+        if (lying || impact > limit || depth > 0.12) crashHit = name;
+      }
+      // Front/rear tyre straight into a wall: a crash only above a speed that grows with assist.
+      if (!crashProbe && -vn > lerp(7, 11, this.assist) * sp.toughness && name.startsWith('tire')) crashHit = name;
       if (!crashProbe) scrape = Math.max(scrape, vt);
     };
     for (const bp of sp.bodyPoints) {

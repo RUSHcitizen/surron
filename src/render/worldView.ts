@@ -61,7 +61,8 @@ function terrainMaterial(map: CanvasTexture) {
           float near = 1.0 - smoothstep(25.0, 90.0, dist);
           float big = vnoise(p * 0.035) * 0.6 + vnoise(p * 0.11) * 0.4;
           float mid = vnoise(p * 0.6);
-          float fine = vnoise(p * 3.1);
+          // The finest detail only matters close to the camera; skip it far away.
+          float fine = near > 0.0 ? vnoise(p * 3.1) : 0.5;
           // Asphalt: darker patches + light aggregate speckle.
           float asp = 0.88 + big * 0.22 + (fine - 0.5) * 0.12 * near;
           // Concrete: 4 m slabs with dark joints and per-slab tone.
@@ -706,7 +707,8 @@ export class WorldView {
         float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.0-2.0*f);
           return mix(mix(hash(i), hash(i+vec2(1,0)), u.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), u.x), u.y); }
-        float fbm(vec2 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++){ s += a*vnoise(p); p = p*2.03 + 7.1; a *= 0.5; } return s; }
+        float fbm(vec2 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 4; i++){ s += a*vnoise(p); p = p*2.03 + 7.1; a *= 0.5; } return s; }
+        float fbm2(vec2 p){ return vnoise(p) * 0.6 + vnoise(p * 2.03 + 7.1) * 0.3; }
         void main(){
           vec3 d = normalize(vDir); float h = d.y;
           vec3 c = h > 0.0 ? mix(horizon, top, pow(max(h, 0.0), 0.55)) : mix(horizon, ground, pow(-h, 0.4));
@@ -716,7 +718,7 @@ export class WorldView {
             vec2 uv = d.xz / (h + 0.12) * 1.6 + vec2(time * 0.004, time * 0.0015);
             float n = fbm(uv);
             float m = smoothstep(cover, cover + 0.28, n);
-            float lit = 0.6 + 0.4 * smoothstep(0.0, 1.0, fbm(uv + sunDir.xz * 0.15) - n + 0.5);
+            float lit = 0.6 + 0.4 * smoothstep(0.0, 1.0, fbm2(uv + sunDir.xz * 0.15) - n + 0.5);
             vec3 cc = mix(cloudShade, cloudColor, lit) + sunColor * pow(s, 8.0) * 0.35;
             c = mix(c, cc, m * smoothstep(0.01, 0.18, h) * 0.92);
           }

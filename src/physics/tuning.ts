@@ -85,6 +85,9 @@ export const TUNING = {
     /** Yaw damping applied only in big slides (N·m·s/rad, scaled by assist). */
     slideYawDamping: 180,
     /** Roll support from the rider's foot in big slides (scaled by assist). */
+    /** Lean "save": torque that stands the bike up once it leans past what the rider can hold. */
+    catchStiffness: 1400,
+    catchDamping: 260,
     slideRollStiffness: 900,
     slideRollDamping: 160,
     airRollStiffness: 160,

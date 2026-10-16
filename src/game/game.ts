@@ -3,7 +3,7 @@
  * Physics runs at a fixed step (TUNING.dt); rendering interpolates between steps.
  */
 import {
-  ACESFilmicToneMapping, DirectionalLight, Fog, HemisphereLight, Matrix4, PCFSoftShadowMap, PerspectiveCamera,
+  ACESFilmicToneMapping, DirectionalLight, Fog, HemisphereLight, Matrix4, PCFShadowMap, PCFSoftShadowMap, PerspectiveCamera,
   PMREMGenerator, Quaternion, Scene, SpotLight, SRGBColorSpace, Vector3, WebGLRenderer,
 } from 'three';
 import type { WebGLRenderTarget } from 'three';
@@ -192,6 +192,10 @@ export class Game {
     this.respawn('hub');
     this.setState('menu');
     if (this.save.warning) this.ui.toast(this.save.warning, 6000);
+    // Compile every shader now (behind the loading screen) so nothing stutters on first sight.
+    try {
+      this.renderer.compile(this.scene, this.camera);
+    } catch { /* best effort */ }
     requestAnimationFrame(this.frame);
   }
 
@@ -206,6 +210,17 @@ export class Game {
     this.perf.ceiling = 99;
     this.renderer.setPixelRatio(this.dynPR);
     this.renderer.shadowMap.enabled = this.quality.shadows;
+    // Soft (many-tap) shadow filtering only on High; Medium uses plain PCF, much cheaper on phones.
+    const shadowType = s.quality === 'high' ? PCFSoftShadowMap : PCFShadowMap;
+    if (this.renderer.shadowMap.type !== shadowType) {
+      this.renderer.shadowMap.type = shadowType;
+      // Shaders bake the shadow filter in: recompile on change.
+      this.scene.traverse((o) => {
+        const m = (o as { material?: { needsUpdate: boolean } | { needsUpdate: boolean }[] }).material;
+        if (Array.isArray(m)) m.forEach((x) => (x.needsUpdate = true));
+        else if (m) m.needsUpdate = true;
+      });
+    }
     this.sun.castShadow = this.quality.shadows;
     this.sun.shadow.mapSize.set(this.quality.shadowSize, this.quality.shadowSize);
     this.sun.shadow.map?.dispose();
@@ -239,6 +254,7 @@ export class Game {
     this.touch.setLeftHanded(s.leftHanded);
     this.setTimeOfDay(s.timeOfDay);
     this.updateTouchVisibility();
+    if (this.perfLevel) this.applyPerfLevel();
     this.resize();
   }
 
@@ -358,18 +374,37 @@ export class Game {
     this.fps = this.frameTimes.length / this.frameTimes.reduce((a, b) => a + b, 0);
     this.time += dt;
     if (this.contextLost) return;
-    this.adaptResolution(dt);
-    if (this.state === 'garage') {
-      this.ui.garage.update(dt);
-      this.ui.garage.render(this.renderer);
-      return;
+    // One bad frame must never stop the game: catch, report once, keep running.
+    try {
+      this.adaptResolution(dt);
+      if (this.state === 'garage') {
+        this.ui.garage.update(dt);
+        this.ui.garage.render(this.renderer);
+        return;
+      }
+      this.input.update(dt, this.bike.speed);
+      if (this.state === 'ride') this.rideUpdate(dt);
+      else if (this.state === 'menu') this.menuUpdate(dt);
+      this.renderer.render(this.scene, this.camera);
+      this.onFrame?.(dt);
+    } catch (e) {
+      this.reportError(e);
+      // A physics blow-up (NaN) is recoverable: put the bike back on its last safe spot.
+      if (!Number.isFinite(this.bike.pos.x + this.bike.pos.y + this.bike.pos.z)) {
+        this.bike.reset();
+        this.cam.snap();
+      }
     }
-    this.input.update(dt, this.bike.speed);
-    if (this.state === 'ride') this.rideUpdate(dt);
-    else if (this.state === 'menu') this.menuUpdate(dt);
-    this.renderer.render(this.scene, this.camera);
-    this.onFrame?.(dt);
   };
+
+  private errorCount = 0;
+  /** Show an error on screen (once per message) so it can be reported, without stopping the game. */
+  reportError(e: unknown) {
+    this.errorCount++;
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(e);
+    if (this.errorCount <= 3) this.ui?.toast(`Something went wrong (${msg.slice(0, 80)}). The game kept running.`, 5000);
+  }
 
   /**
    * Keep frame rate up on phones: drop the render resolution when frames are slow, creep back
@@ -390,15 +425,46 @@ export class Game {
     const max = Math.min(window.devicePixelRatio || 1, this.quality.pixelRatio, p.ceiling);
     const min = Math.min(max, this.settings.quality === 'low' ? 0.85 : 1);
     let next = this.dynPR;
+    if (slowFrac > 0.25 && this.dynPR <= min + 0.01) {
+      // Already at the lowest resolution and still slow: shed the most expensive extras.
+      this.degrade();
+      p.cooldown = 2;
+      return;
+    }
     if (slowFrac > 0.25) {
       p.ceiling = Math.min(p.ceiling, this.dynPR - 0.01);
-      next = Math.max(min, this.dynPR * 0.85);
+      next = Math.max(min, this.dynPR * 0.8);
     } else if (slowFrac < 0.02 && this.dynPR < max) next = Math.min(max, this.dynPR + 0.1);
     if (Math.abs(next - this.dynPR) > 0.01) {
       this.dynPR = next;
       this.renderer.setPixelRatio(next);
       this.resize();
-      p.cooldown = 3;
+      p.cooldown = 2;
+    }
+  }
+
+  /** Performance safety net level (0 = as configured). Session only; Settings are unchanged. */
+  perfLevel = 0;
+  private degrade() {
+    if (this.perfLevel >= 3) return;
+    this.perfLevel++;
+    this.applyPerfLevel();
+    if (this.perfLevel === 1) this.ui.toast('Lowering some effects to keep the game smooth', 2500);
+  }
+
+  private applyPerfLevel() {
+    const L = this.perfLevel;
+    if (L >= 1) this.grass.setCount(0);
+    if (L >= 2) {
+      this.renderer.shadowMap.enabled = false;
+      this.sun.castShadow = false;
+    }
+    if (L >= 3) {
+      for (const c of this.crowds) c.peds.setCount(Math.ceil(c.peds.peds.length * 0.3));
+      this.view.cullDistance = Math.min(this.view.cullDistance, 240);
+      const fog = this.scene.fog as Fog;
+      fog.far = Math.min(fog.far, 260);
+      fog.near = Math.min(fog.near, 70);
     }
   }
 

@@ -9,7 +9,7 @@ import { DEFAULT_BINDINGS } from '../input/input';
 import type { Bindings } from '../input/input';
 import type { DrainMode } from '../physics/powertrain';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export type Quality = 'low' | 'medium' | 'high';
 export interface Settings {
@@ -58,9 +58,9 @@ export interface SaveData {
 export function defaultSettings(): Settings {
   const touch = typeof window !== 'undefined' && matchMedia?.('(pointer: coarse)').matches;
   return {
-    master: 0.8, motor: 0.8, sfx: 0.8, ambience: 0.5, quality: touch ? 'medium' : 'high', assist: 0.65,
+    master: 0.8, motor: 0.8, sfx: 0.8, ambience: 0.5, quality: touch ? 'medium' : 'high', assist: 0.85,
     camDistance: 4.2, camSensitivity: 1, steerSensitivity: 1, units: 'kmh', showTelemetry: true, showFps: false,
-    timeOfDay: 'day', drain: 'relaxed', touchControls: 'auto', leftHanded: false, rideMode: 'standard', pedestrians: true,
+    timeOfDay: 'day', drain: 'relaxed', touchControls: 'auto', leftHanded: false, rideMode: 'sport', pedestrians: true,
     adaptiveResolution: true,
   };
 }
@@ -91,13 +91,14 @@ export function migrate(raw: unknown): SaveData {
   const settings: Settings = {
     master: num(s.master, 0, 1, ds.master), motor: num(s.motor, 0, 1, ds.motor), sfx: num(s.sfx, 0, 1, ds.sfx),
     ambience: num(s.ambience, 0, 1, ds.ambience), quality: pick(s.quality, ['low', 'medium', 'high'] as const, ds.quality),
-    assist: num(s.assist, 0, 1, ds.assist), camDistance: num(s.camDistance, 2.5, 9, ds.camDistance),
+    // v3 raised the default assist (0.65 → 0.85); saves still on the old default move up with it.
+    assist: (r.version ?? 1) < 3 && s.assist === 0.65 ? 0.85 : num(s.assist, 0, 1, ds.assist), camDistance: num(s.camDistance, 2.5, 9, ds.camDistance),
     camSensitivity: num(s.camSensitivity, 0.2, 3, 1), steerSensitivity: num(s.steerSensitivity, 0.4, 2, 1),
     units: pick(s.units, ['kmh', 'mph'] as const, 'kmh'), showTelemetry: typeof s.showTelemetry === 'boolean' ? s.showTelemetry : true,
     showFps: s.showFps === true, timeOfDay: pick(s.timeOfDay, ['day', 'sunset', 'night'] as const, 'day'),
     drain: pick(s.drain, ['realistic', 'relaxed', 'off'] as const, ds.drain),
     touchControls: pick(s.touchControls, ['auto', 'on', 'off'] as const, 'auto'), leftHanded: s.leftHanded === true,
-    rideMode: pick(s.rideMode, ['eco', 'standard', 'sport'] as const, 'standard'), pedestrians: s.pedestrians !== false,
+    rideMode: (r.version ?? 1) < 3 && s.rideMode === 'standard' ? 'sport' : pick(s.rideMode, ['eco', 'standard', 'sport'] as const, 'sport'), pedestrians: s.pedestrians !== false,
     adaptiveResolution: s.adaptiveResolution !== false,
   };
   const builds = Array.isArray(r.builds) ? r.builds.slice(0, 60).map(sanitizeBuild) : d.builds;

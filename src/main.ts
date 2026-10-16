@@ -23,6 +23,8 @@ async function boot() {
     const game = new Game(document.getElementById('app')!);
     await game.init();
     (window as unknown as { voltline: Game }).voltline = game;
+    window.addEventListener('error', (e) => game.reportError(e.error ?? e.message));
+    window.addEventListener('unhandledrejection', (e) => game.reportError(e.reason));
     const b = document.getElementById('boot');
     if (b) {
       b.style.opacity = '0';
@@ -32,7 +34,8 @@ async function boot() {
     console.error(e);
     if (msg) msg.textContent = `Failed to start: ${(e as Error).message}`;
   }
-  registerServiceWorker();
+  const g = (window as unknown as { voltline?: Game }).voltline;
+  registerServiceWorker(() => !g || g.state !== 'ride');
 }
 
 void boot();

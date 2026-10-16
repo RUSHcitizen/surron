@@ -327,3 +327,31 @@ describe('trick buttons', () => {
     expect(bike.speed).toBeLessThan(11);
   });
 });
+
+describe('forgiving for casual phone riding', () => {
+  it('jabby touch-style inputs rarely crash at the default assist', () => {
+    let crashes = 0;
+    for (const [pi, surf] of [[0, 'asphalt'], [1, 'dirt'], [2, 'asphalt'], [4, 'grass']] as const) {
+      const bike = makeBike(computeVehicleSpec(PRESETS[pi]), flatWorld(4000, surf));
+      bike.assist = 0.85;
+      settle(bike);
+      let seed = 17 + pi;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      let tT = 0, tS = 0, thrT = 0.8, steerT = 0;
+      const s = { ...emptyInput() };
+      const toward = (c: number, t: number, r: number) => c + Math.max(-r / 240, Math.min(r / 240, t - c));
+      for (let i = 0; i < 40 * 240; i++) {
+        if ((tT -= 1 / 240) <= 0) { tT = 0.5 + rnd() * 2.5; thrT = rnd() < 0.2 ? 0 : 0.45 + rnd() * 0.55; }
+        if ((tS -= 1 / 240) <= 0) { tS = 0.3 + rnd() * 1.5; steerT = rnd() < 0.35 ? 0 : (rnd() < 0.5 ? -1 : 1) * (0.4 + rnd() * 0.6); }
+        s.throttle = toward(s.throttle, thrT, 30);
+        s.steer = toward(s.steer, steerT, 12 / (1 + Math.abs(bike.speed) / 9));
+        bike.step(s);
+        for (const e of bike.events) if (e.type === 'crash') crashes++;
+        bike.events.length = 0;
+        if (bike.wantsReset) bike.reset();
+      }
+    }
+    // 160 s of deliberately jabby riding across four bikes and surfaces.
+    expect(crashes).toBeLessThanOrEqual(1);
+  });
+});

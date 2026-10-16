@@ -31,6 +31,7 @@ function serviceWorker(): Plugin {
 }
 
 export default defineConfig({
+  define: { __BUILD__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC') },
   // Relative base: works at the domain root or any sub-path (Cloudflare Pages, previews, sub-folders).
   base: './',
   build: {

@@ -199,9 +199,13 @@ export class Input {
     let steerT = kSteer;
     let analogSteer = false;
     if (Math.abs(gSteer) > 0) { steerT = gSteer; analogSteer = true; }
-    if (t.steer !== null) { steerT = t.steer; analogSteer = true; }
+    let touchSteer = false;
+    if (t.steer !== null) { steerT = t.steer; analogSteer = true; touchSteer = true; }
     steerT = Math.max(-1, Math.min(1, steerT * this.steerSensitivity));
-    if (analogSteer) s.steer = approach(s.steer, steerT, 12, 12);
+    // A thumb on a glass stick jumps much faster than a real rider moves the bars: at speed,
+    // touch steering is eased in (it still returns to centre quickly).
+    const steerRate = touchSteer ? 12 / (1 + Math.abs(speed) / 9) : 12;
+    if (analogSteer) s.steer = approach(s.steer, steerT, Math.abs(steerT) > Math.abs(s.steer) ? steerRate : 12, 12);
     else {
       const rate = (3.2 - Math.min(1.6, Math.abs(speed) / 15)) * this.steerSensitivity;
       const ret = 5;
