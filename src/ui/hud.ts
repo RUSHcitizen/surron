@@ -25,6 +25,9 @@ export class Hud {
 
   constructor(private game: Game, parent: HTMLElement) {
     this.el = h('div', { class: 'hud' });
+    // Speed vignette: darkened, streaked edges that fade in at high speed (pure CSS, no GPU pass).
+    this.speedFx = h('div', { class: 'speedfx' });
+    this.el.append(this.speedFx);
     this.speed = h('span', {}, '0');
     this.unit = h('small', {}, 'km/h');
     this.mode = h('div', { class: 'hud-mode' }, 'STD');
@@ -66,8 +69,16 @@ export class Hud {
     setTimeout(() => p.remove(), 1100);
   }
 
+  private speedFx: HTMLElement;
+  private lastFx = '';
+
   update(dt: number) {
     const g = this.game;
+    const fx = Math.max(0, Math.min(1, (Math.abs(g.bike.speed) * 3.6 - 45) / 45)).toFixed(2);
+    if (fx !== this.lastFx) {
+      this.lastFx = fx;
+      this.speedFx.style.opacity = fx;
+    }
     this.el.classList.toggle('hidden', !g.hudVisible);
     if (!g.hudVisible) return;
     const b = g.bike;

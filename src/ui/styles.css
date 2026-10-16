@@ -304,3 +304,11 @@ table.cmp td.best { color: var(--accent); font-weight: 700; }
 .t-wheelie::before { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--hold, 0) * 100%); background: linear-gradient(to top, rgba(255, 84, 104, 0.75), rgba(255, 176, 32, 0.5)); pointer-events: none; }
 .t-trick { isolation: isolate; }
 .t-wheelie::before { z-index: -1; }
+.speedfx {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.25s linear;
+  background:
+    radial-gradient(ellipse at center, transparent 55%, rgba(5, 8, 12, 0.45) 100%),
+    repeating-conic-gradient(from 0deg at 50% 52%, rgba(255, 255, 255, 0.05) 0deg 0.6deg, transparent 0.6deg 7deg);
+  -webkit-mask-image: radial-gradient(ellipse at center, transparent 45%, #000 85%);
+  mask-image: radial-gradient(ellipse at center, transparent 45%, #000 85%);
+}

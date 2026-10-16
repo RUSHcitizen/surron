@@ -314,7 +314,9 @@ export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: C
     e.fillRect(0, 0, S, S);
     o.fillStyle = 'rgb(0,235,0)';
     o.fillRect(0, 0, S, S);
+    const panes: [number, number, number, number][] = [];
     const glass = (x: number, y: number, w: number, h: number, warm = false) => {
+      panes.push([x, y, w, h]);
       const gr = g.createLinearGradient(x, y, x + w * 0.4, y + h);
       gr.addColorStop(0, warm ? '#6d5a44' : '#7d97ad');
       gr.addColorStop(0.5, warm ? '#3e3226' : '#3a4d5e');
@@ -329,10 +331,6 @@ export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: C
       g.fill();
       o.fillStyle = 'rgb(0,30,170)';
       o.fillRect(x, y, w, h);
-      if (r() < 0.3) {
-        e.fillStyle = r() < 0.5 ? '#ffd890' : '#ffe9c2';
-        e.fillRect(x, y, w, h);
-      }
     };
     const frame = (x: number, y: number, w: number, h: number, c: string, t: number) => {
       g.fillStyle = c;
@@ -408,8 +406,6 @@ export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: C
       g.fillStyle = '#d9d4c7';
       for (let i = 0; i < 5; i++) g.fillRect(24 + i * 22 + r() * 6, 16, 14, 14); // sign lettering blocks
       glass(10, 60, 170, 170, true);
-      e.fillStyle = '#ffcf8a';
-      e.fillRect(10, 60, 170, 170);
       g.fillStyle = 'rgba(255,220,170,0.35)';
       g.fillRect(10, 200, 170, 30); // interior counter glow
       frame(10, 60, 170, 170, '#1b1d21', 5);
@@ -423,8 +419,23 @@ export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: C
       g.fillStyle = style === 'brick' ? '#8a5644' : style === 'shop' ? '#3a3d44' : '#ece8e0';
       g.fillRect(0, 0, 10, 10);
     }
+    // Night windows: the emissive map spans 4×4 window bays (repeat ¼), each pane lit at random,
+    // so neighbouring windows differ instead of every bay sharing one lit/unlit state.
+    em.c.width = em.c.height = S * 2;
+    e.fillStyle = '#000';
+    e.fillRect(0, 0, S * 2, S * 2);
+    const sc = 0.5;
+    for (let ty = 0; ty < 4; ty++) for (let tx = 0; tx < 4; tx++) {
+      panes.forEach(([x, y, w, h2], k) => {
+        const lit = style === 'shop' ? k === 0 || r() < 0.5 : r() < (style === 'office' ? 0.45 : 0.38);
+        if (!lit) return;
+        e.fillStyle = r() < 0.5 ? '#ffd890' : r() < 0.5 ? '#ffe9c2' : '#cfe4ff';
+        e.fillRect((tx * S + x) * sc, (ty * S + y) * sc, w * sc, h2 * sc);
+      });
+    }
     const t = tex(col.c, true);
     const te = tex(em.c, true);
+    te.repeat.set(0.25, 0.25);
     const to = tex(orm.c, true, false);
     t.anisotropy = te.anisotropy = to.anisotropy = 8;
     return { map: t, emissive: te, orm: to } as unknown as Texture;

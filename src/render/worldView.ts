@@ -3,7 +3,7 @@
  * merged per material, vegetation/props are instanced.
  */
 import {
-  BackSide, BoxGeometry, BufferAttribute, CanvasTexture, CapsuleGeometry, DoubleSide, MeshPhysicalMaterial, Shape, ShapeGeometry, TorusGeometry, BufferGeometry, Color, ConeGeometry, CylinderGeometry,
+  AdditiveBlending, BackSide, BoxGeometry, BufferAttribute, CanvasTexture, CircleGeometry, UniformsLib, UniformsUtils, Vector2, CapsuleGeometry, DoubleSide, MeshPhysicalMaterial, Shape, ShapeGeometry, TorusGeometry, BufferGeometry, Color, ConeGeometry, CylinderGeometry,
   Euler, Float32BufferAttribute, Group, IcosahedronGeometry, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial,
   MeshStandardMaterial, OctahedronGeometry, PlaneGeometry, Quaternion, Scene, ShaderMaterial, SphereGeometry, Vector3,
 } from 'three';
@@ -41,14 +41,19 @@ float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.0-2.0*f);
  * blends procedural detail per surface (asphalt aggregate + patches, concrete slab joints,
  * loose ground clods, grass streaks), fading high frequencies with distance to avoid shimmer.
  */
+/** Shared uniforms for drifting cloud shadows on the ground (offset in metres, strength 0..1). */
+export const CLOUD_SHADOW = { offset: { value: new Vector2() }, amount: { value: 0.2 } };
+
 function terrainMaterial(map: CanvasTexture) {
   const m = new MeshStandardMaterial({ vertexColors: true, map, roughness: 0.95, metalness: 0 });
   m.onBeforeCompile = (sh) => {
+    sh.uniforms.cloudOffset = CLOUD_SHADOW.offset;
+    sh.uniforms.cloudAmount = CLOUD_SHADOW.amount;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 splat; varying vec4 vSplat; varying vec3 vWPos;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSplat = splat; vWPos = (modelMatrix * vec4(position, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec4 vSplat; varying vec3 vWPos;' + NOISE_GLSL)
+      .replace('#include <common>', '#include <common>\nvarying vec4 vSplat; varying vec3 vWPos; uniform vec2 cloudOffset; uniform float cloudAmount;' + NOISE_GLSL)
       .replace('#include <color_fragment>', `#include <color_fragment>
         {
           vec2 p = vWPos.xz;
@@ -72,6 +77,10 @@ function terrainMaterial(map: CanvasTexture) {
           diffuseColor.rgb *= mix(1.0, k, min(1.0, w));
           // Dry/lush hue variation on grass.
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.15, 1.02, 0.75), vSplat.w * smoothstep(0.45, 0.75, big) * 0.6);
+          // Soft cloud shadows drifting across the land.
+          vec2 cp = (p + cloudOffset) * 0.0045;
+          float cs = smoothstep(0.5, 0.78, vnoise(cp) * 0.65 + vnoise(cp * 2.7 + 3.1) * 0.35);
+          diffuseColor.rgb *= 1.0 - cs * cloudAmount;
         }`);
   };
   return m;
@@ -227,6 +236,8 @@ export class WorldView {
     this.buildLabels();
     this.buildDecor();
     this.buildSky();
+    this.buildWater();
+    this.buildLightPools();
   }
 
   private mat<T extends Material>(m: T) {
@@ -238,6 +249,18 @@ export class WorldView {
     const hf = this.data.terrain;
     const detail = groundDetail();
     const mat = this.mat(terrainMaterial(detail));
+    // Ambient occlusion baked into the vertex colours: soft dark patches under trees and rocks.
+    const ao = new Float32Array(hf.n * hf.n).fill(1);
+    const occlude = (x: number, z: number, r: number, k: number) => {
+      const i0 = Math.max(0, Math.floor((x - r - hf.x0) / hf.cell)), i1 = Math.min(hf.n - 1, Math.ceil((x + r - hf.x0) / hf.cell));
+      const j0 = Math.max(0, Math.floor((z - r - hf.z0) / hf.cell)), j1 = Math.min(hf.n - 1, Math.ceil((z + r - hf.z0) / hf.cell));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const d = Math.hypot(hf.x0 + i * hf.cell - x, hf.z0 + j * hf.cell - z);
+        if (d < r) ao[hf.index(i, j)] *= 1 - k * (1 - d / r) * (1 - d / r);
+      }
+    };
+    for (const t of this.data.trees) occlude(t.x, t.z, 4.2 * t.s, t.kind === 0 ? 0.45 : 0.5);
+    for (const r of this.data.rocks) occlude(r.x, r.z, 1.6 * r.s + 0.6, 0.35);
     const CH = 64;
     const cells = hf.n - 1;
     for (let cz = 0; cz < cells; cz += CH) {
@@ -262,9 +285,10 @@ export class WorldView {
             spl.set(SURF_SPLAT[s] ?? SURF_SPLAT.grass, k * 4);
             const n = fbm(x / 18, z / 18, 2) * 0.12;
             const n2 = s === 'grass' ? fbm(x / 60 + 5, z / 60, 2) * 0.12 : 0;
-            col[k * 3] = Math.max(0, c[0] * (1 + n) + n2 * 0.4);
-            col[k * 3 + 1] = Math.max(0, c[1] * (1 + n) + n2);
-            col[k * 3 + 2] = Math.max(0, c[2] * (1 + n));
+            const occ = ao[hf.index(ix, iz)];
+            col[k * 3] = Math.max(0, c[0] * (1 + n) + n2 * 0.4) * occ;
+            col[k * 3 + 1] = Math.max(0, c[1] * (1 + n) + n2) * occ;
+            col[k * 3 + 2] = Math.max(0, c[2] * (1 + n)) * occ;
             uv[k * 2] = x / 6;
             uv[k * 2 + 1] = z / 6;
           }
@@ -561,6 +585,91 @@ export class WorldView {
     }
   }
 
+  water!: Mesh;
+  private waterMat!: ShaderMaterial;
+  /** Lake surface: animated ripples, Fresnel sky reflection and sun glints (one draw call). */
+  private buildWater() {
+    const L = this.data.lake;
+    this.waterMat = new ShaderMaterial({
+      transparent: true,
+      fog: true,
+      uniforms: UniformsUtils.merge([UniformsLib.fog, {
+        time: { value: 0 },
+        sunDir: { value: new Vector3(0.5, 0.7, 0.4).normalize() },
+        sunColor: { value: new Color(0xfff2cc) },
+        skyTop: { value: new Color(0x2f6fc4) },
+        skyHorizon: { value: new Color(0xcfe3f2) },
+        deep: { value: new Color(0x0f3a4a) },
+        shallow: { value: new Color(0x2f7f7a) },
+        center: { value: new Vector2(L.x, L.z) },
+        radius: { value: L.r },
+      }]),
+      vertexShader: `varying vec3 vW;
+        #include <fog_pars_vertex>
+        void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vec4 mvPosition = viewMatrix * w; gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+        }`,
+      fragmentShader: `uniform float time; uniform vec3 sunDir; uniform vec3 sunColor; uniform vec3 skyTop; uniform vec3 skyHorizon;
+        uniform vec3 deep; uniform vec3 shallow; uniform vec2 center; uniform float radius; varying vec3 vW;
+        ${NOISE_GLSL}
+        #include <fog_pars_fragment>
+        float h(vec2 p){ return vnoise(p * 0.35 + vec2(time * 0.25, time * 0.18)) * 0.6 + vnoise(p * 0.9 - vec2(time * 0.4, -time * 0.3)) * 0.4; }
+        void main(){
+          vec2 p = vW.xz;
+          float e = 0.15;
+          vec3 n = normalize(vec3(h(p - vec2(e, 0.0)) - h(p + vec2(e, 0.0)), 1.6, h(p - vec2(0.0, e)) - h(p + vec2(0.0, e))));
+          vec3 v = normalize(cameraPosition - vW);
+          float fres = 0.06 + 0.94 * pow(1.0 - max(dot(n, v), 0.0), 4.0);
+          vec3 r = reflect(-v, n);
+          vec3 sky = mix(skyHorizon, skyTop, clamp(r.y * 1.8, 0.0, 1.0));
+          float shore = smoothstep(radius * 0.55, radius, length(p - center));
+          vec3 body = mix(deep, shallow, shore);
+          vec3 c = mix(body, sky, fres) + sunColor * pow(max(dot(r, sunDir), 0.0), 220.0) * 2.5;
+          gl_FragColor = vec4(c, mix(0.92, 0.7, shore));
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+          #include <fog_fragment>
+        }`,
+    });
+    this.materials.push(this.waterMat);
+    const g = new CircleGeometry(L.r + 1.5, 72);
+    g.rotateX(-Math.PI / 2);
+    this.water = new Mesh(g, this.waterMat);
+    this.water.position.set(L.x, L.level, L.z);
+    this.water.receiveShadow = false;
+    this.root.add(this.water);
+  }
+
+  private poolMat!: MeshBasicMaterial;
+  /** Warm pools of light under the street lamps (visible at dusk and night). */
+  private buildLightPools() {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 128;
+    const g = cv.getContext('2d')!;
+    const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gr.addColorStop(0, 'rgba(255,214,150,0.85)');
+    gr.addColorStop(0.45, 'rgba(255,190,120,0.35)');
+    gr.addColorStop(1, 'rgba(255,170,100,0)');
+    g.fillStyle = gr;
+    g.fillRect(0, 0, 128, 128);
+    const tex = new CanvasTexture(cv);
+    tex.colorSpace = 'srgb';
+    this.poolMat = this.mat(new MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+    const geo = new PlaneGeometry(11, 11);
+    geo.rotateX(-Math.PI / 2);
+    const L = this.data.lights;
+    const im = new InstancedMesh(geo, this.poolMat, Math.max(1, L.length));
+    const m4 = new Matrix4(), q = new Quaternion(), p = new Vector3(), sc = new Vector3(1, 1, 1);
+    L.forEach((l, i) => {
+      const x = l.x + Math.sin(l.yaw) * 1.6, z = l.z + Math.cos(l.yaw) * 1.6;
+      m4.compose(p.set(x, this.data.terrain.heightAt(x, z) + 0.2, z), q, sc);
+      im.setMatrixAt(i, m4);
+    });
+    im.computeBoundingSphere();
+    im.renderOrder = 2;
+    this.root.add(im);
+  }
+
   private buildLabels() {
     for (const l of this.data.labels) {
       const t = signTexture(l.text);
@@ -688,6 +797,8 @@ export class WorldView {
     this.sky.position.copy(camPos);
     this.mountains.position.set(camPos.x, 0, camPos.z);
     this.skyMat.uniforms.time.value = time;
+    this.waterMat.uniforms.time.value = time;
+    CLOUD_SHADOW.offset.value.set(time * 2.2, time * 0.9);
   }
 
   setTimeOfDay(mode: 'day' | 'sunset' | 'night', sunDir: Vector3) {
@@ -714,6 +825,16 @@ export class WorldView {
       m.emissiveIntensity = night ? 0.9 : 0.3;
     }
     this.lampMat.emissiveIntensity = night ? 3 : mode === 'sunset' ? 1 : 0.2;
+    this.poolMat.opacity = night ? 1 : mode === 'sunset' ? 0.35 : 0;
+    this.poolMat.visible = this.poolMat.opacity > 0;
+    CLOUD_SHADOW.amount.value = mode === 'day' ? 0.22 : mode === 'sunset' ? 0.12 : 0;
+    const wu = this.waterMat.uniforms;
+    wu.sunDir.value.copy(sunDir);
+    wu.sunColor.value.copy(u.sunColor.value);
+    wu.skyTop.value.copy(u.top.value);
+    wu.skyHorizon.value.copy(u.horizon.value);
+    wu.deep.value.set(night ? 0x02080c : mode === 'sunset' ? 0x1a2a3a : 0x0f3a4a);
+    wu.shallow.value.set(night ? 0x061418 : mode === 'sunset' ? 0x3a4a50 : 0x2f7f7a);
   }
 
   /** Knock cones the bike touches; returns number newly knocked over. */

@@ -69,6 +69,13 @@ The service worker is only registered in production builds (`npm run build && np
   * A city of distinct buildings: brick, glass offices with setback towers, apartments with balconies, stucco houses. They have shopfronts, awnings, cornices, rooftop units, water tanks and street trees.
   * Volumetric-looking clouds, distant mountain ranges, terrain shading that blends asphalt, concrete slabs, dirt and grass.
   * Wind-swayed grass, organic trees, track flags and tyre stacks, EV chargers and planters at the hub.
+  * A lake with animated, sky-reflecting water and sun glints. Ride in and you get a splash and water drag; go under and you're
+    put back on the shore.
+  * Drifting cloud shadows, soft baked shadows under trees and rocks, flocks of birds.
+  * At night, per-window city lights and warm pools of light under street lamps.
+  * A speed vignette at high speed.
+* **Crowds**: about 100 people in the city on two-way sidewalks (walkers, joggers, people window-shopping or on their phones),
+  plus cheering spectators at the MX track, stunt park and hub.
   * Mobile-friendly: vegetation is chunked and distance-culled, static bike parts are merged, and adaptive resolution keeps the frame rate up.
 
 * **Motorcycle physics**: a 6-DOF rigid body with two suspended wheels.
@@ -92,7 +99,9 @@ The service worker is only registered in production builds (`npm run build && np
   * swingarm length, steering geometry (rake/offset → trail)
   * handlebar, seat, rider position, frame, body kit, fenders, lights, brakes
   * sprockets (final drive), regen strength
-  * paint, finish, decals, number plate
+  * motor cooling (finned cover, liquid jacket), steering damper, footpegs, handguards
+  * paint, finish (incl. chrome and pearl), decals, number plate, fork tube and grip colours
+  * **Rider**: weight (50–115 kg, changes the physics), helmet style (MX, full-face, trail) and gear colours
 * **Garage**:
   * Live 3D preview and stats with deltas against the version you started from.
   * Clearly separated **estimates**, **simulated test bench** results (the real physics run headlessly), and **measured** in-world results.
@@ -169,7 +178,7 @@ npm run deploy        # = npm run build && npx wrangler pages deploy dist --proj
 
 ## Tests
 
-* `npm test`: 44 Vitest tests.
+* `npm test`: 47 Vitest tests.
   * Physics scenarios:
     * settling and sag; acceleration and top speed; braking for every preset without flipping
     * turn equilibrium vs. tanφ = v²/(gR); right-steer → right-lean; low-speed U-turn; slaloms at 3 speeds
@@ -181,6 +190,7 @@ npm run deploy        # = npm run build && npx wrangler pages deploy dist --proj
     * battery mass and inertia; spring rate and preload
     * swingarm wheelbase and turning circle; eco mode
     * every part option changes the physical spec
+    * rider weight, cooling, steering damper and footpegs effects; old saves migrate to the new rider fields
   * Powertrain: back-EMF fade, drain and regen, thermal derate, limp mode.
   * Saves: garbage → defaults, v1 → v2 migration, round-trip, build import/export.
   * Scoring/medals, and world spawns.

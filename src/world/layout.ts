@@ -40,6 +40,8 @@ export interface WorldData {
   handling: { x: number; z: number; gates: Spawn[] };
   stunt: { x: number; z: number; w: number; d: number };
   garagePad: { x: number; z: number; r: number };
+  /** Lake: centre, shoreline radius and water surface height. */
+  lake: { x: number; z: number; r: number; level: number };
   labels: { text: string; x: number; z: number; yaw: number; y: number }[];
   /** Purely visual dressing (colliders, where needed, are in `boxes`). */
   decor: Decor;
@@ -71,6 +73,8 @@ const DRIFT = { x: 95, z: -185, r: 46 };
 const HANDLING = { x: 230, z: -185, w: 120, d: 74 };
 const STUNT = { x: 135, z: 70, w: 110, d: 90 };
 const SAND = { x: 330, z: -10, r: 36 };
+/** A lake in the north-west park hills. */
+const LAKE = { x: -190, z: 292, r: 38 };
 
 function inRect(x: number, z: number, x0: number, x1: number, z0: number, z1: number, pad = 0) {
   return x >= x0 - pad && x <= x1 + pad && z >= z0 - pad && z <= z1 + pad;
@@ -135,6 +139,9 @@ function baseHeight(x: number, z: number): number {
   // Rolling park hills (north-west, north of the city)
   const park = smoothstep(195, 235, z) * (1 - smoothstep(30, 70, x));
   if (park > 0) h += park * (fbm(x / 70 + 3, z / 70, 3) * 7 + 3);
+  // Lake basin
+  const dl = Math.hypot(x - LAKE.x, z - LAKE.z);
+  if (dl < LAKE.r + 12) h -= 6.5 * (1 - smoothstep(LAKE.r * 0.72, LAKE.r + 10, dl));
   // Map edge berm
   const e = Math.max(Math.abs(x), Math.abs(z));
   if (e > 355) h += Math.pow((e - 355) / 45, 2) * 28;
@@ -206,6 +213,8 @@ export function generateWorld(seed = 7): WorldData {
           if (d < TRACK_HALF + 1.5) surf = 'dirt';
         }
       }
+      // Lake beach
+      if (Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.r + 3.5) surf = 'sand';
       // Sand pit (a shallow bowl)
       const ds = Math.hypot(x - SAND.x, z - SAND.z);
       if (ds < SAND.r) {
@@ -510,6 +519,7 @@ export function generateWorld(seed = 7): WorldData {
     if (!offroad && !park && !south) continue;
     if (inRect(x, z, STUNT.x - STUNT.w / 2, STUNT.x + STUNT.w / 2, STUNT.z - STUNT.d / 2, STUNT.z + STUNT.d / 2, 6)) continue;
     if (Math.hypot(x - SAND.x, z - SAND.z) < SAND.r + 3) continue;
+    if (Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.r + 9) continue;
     if (Math.abs(x - 10) < 12 && z > 0) continue;
     if (Math.abs(z) < 12 && x < 120) continue;
     if (Math.abs(z + 185) < 12 && x < 180) continue;
@@ -624,6 +634,23 @@ export function generateWorld(seed = 7): WorldData {
   // Track flag poles at start
   labels.push({ text: 'MX TRACK', x: track[0].x, z: track[0].z, y: groundAt(track[0].x, track[0].z) + 4.5, yaw: checkpoints[0].yaw + Math.PI });
 
+  // Water surface just below the lowest point of the shoreline, so it never spills.
+  let rim = Infinity;
+  for (let i = 0; i < 72; i++) {
+    const a = (i / 72) * Math.PI * 2;
+    rim = Math.min(rim, hf.heightAt(LAKE.x + Math.cos(a) * LAKE.r, LAKE.z + Math.sin(a) * LAKE.r));
+  }
+  const lake = { ...LAKE, level: rim - 0.1 };
+  // Shore: never below the water just outside the shoreline, so the lake has a clean edge.
+  for (let iz = 0; iz < hf.n; iz++) for (let ix = 0; ix < hf.n; ix++) {
+    const x = hf.x0 + ix * hf.cell, z = hf.z0 + iz * hf.cell;
+    const d = Math.hypot(x - LAKE.x, z - LAKE.z);
+    if (d < LAKE.r - 0.5 || d > LAKE.r + 14) continue;
+    const k = hf.index(ix, iz);
+    hf.heights[k] = Math.max(hf.heights[k], lake.level + 0.08 + (d - LAKE.r + 0.5) * 0.05);
+  }
+  labels.push({ text: 'LAKE', x: LAKE.x + LAKE.r + 8, z: LAKE.z, y: groundAt(LAKE.x + LAKE.r + 8, LAKE.z) + 1.6, yaw: -Math.PI / 2 });
+
   const t0 = checkpoints[0];
   const spawns: Record<string, Spawn> = {
     hub: { x: 20, z: 22, yaw: Math.PI },
@@ -636,11 +663,12 @@ export function generateWorld(seed = 7): WorldData {
     city: { x: -50, z: -150, yaw: 0 },
     offroad: { x: 110, z: 0, yaw: Math.PI / 2 },
     sand: { x: SAND.x - SAND.r - 10, z: SAND.z, yaw: Math.PI / 2 },
+    lake: { x: LAKE.x + LAKE.r + 14, z: LAKE.z, yaw: -Math.PI / 2 },
   };
 
   return {
     terrain: hf, boxes, markings, trees, rocks, lights, cones, pedPaths, collectibles, spawns,
     track: { points: track, checkpoints, halfWidth: TRACK_HALF },
-    drag, driftPad: DRIFT, handling: { x: HANDLING.x, z: HANDLING.z, gates }, stunt: STUNT, garagePad, labels, decor,
+    drag, driftPad: DRIFT, handling: { x: HANDLING.x, z: HANDLING.z, gates }, stunt: STUNT, garagePad, labels, decor, lake,
   };
 }

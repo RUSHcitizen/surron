@@ -76,7 +76,11 @@ instead of exploding it.
 - [x] IndexedDB saves (versioned, migration, corruption-safe, fallbacks).
 - [x] PWA: manifest, icons, generated precaching service worker, offline fallback, cache versioning.
 - [x] Cloudflare Pages config (`_headers`, `wrangler.toml`, docs).
-- [x] 44 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] 47 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] Round 3: cooling/damper/pegs/handguard parts, rider tab (weight + gear), more paint; ~100 city pedestrians with
+      joggers/idlers and spectator crowds (per-area culling, no crowd shadows); lake with water shader, cloud shadows,
+      baked tree AO, birds, night window lights and lamp light pools, speed vignette. Medium at iPhone-15 size measured
+      at ~210–250 draw calls and ~440–550k triangles per frame.
 - [x] Round 2:
   - [x] Bug audit fixes: garage texture leak, Reset everything, immediate saves on backgrounding, audio silenced off-ride,
         Long Jump stale result, unlock re-announcements, hidden pedestrians colliding, stuck rebinds, lifetime odometer,

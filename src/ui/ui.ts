@@ -12,7 +12,7 @@ import { Hud } from './hud';
 
 const TELEPORTS: [string, string][] = [
   ['hub', 'Hub & Garage'], ['city', 'City streets'], ['drag', 'Drag strip'], ['drift', 'Drift pad'], ['handling', 'Cone course'],
-  ['track', 'MX track'], ['stunt', 'Stunt park'], ['offroad', 'Off-road hills'], ['sand', 'Sand pit'],
+  ['track', 'MX track'], ['stunt', 'Stunt park'], ['offroad', 'Off-road hills'], ['sand', 'Sand pit'], ['lake', 'Lake'],
 ];
 
 const keyName = (c: string) => c.replace(/^Key/, '').replace(/^Digit/, '').replace('ArrowUp', '↑').replace('ArrowDown', '↓').replace('ArrowLeft', '←').replace('ArrowRight', '→').replace('ShiftLeft', 'L-Shift').replace('ShiftRight', 'R-Shift').replace('Space', 'Space').replace('Escape', 'Esc');

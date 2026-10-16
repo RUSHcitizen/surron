@@ -21,6 +21,7 @@ import type { Quality } from '../render/worldView';
 import { BikeModel } from '../render/bikeModel';
 import { Particles, TireMarks } from '../render/effects';
 import { Grass } from '../render/grass';
+import { Birds } from '../render/birds';
 import { ChaseCamera } from '../camera/chaseCamera';
 import { Input } from '../input/input';
 import { TouchControls } from '../input/touch';
@@ -69,6 +70,8 @@ export class Game {
   particles: Particles;
   peds: Pedestrians;
   grass: Grass;
+  birds: Birds;
+  private wet = { under: 0, splashed: false, dry: { x: 0, z: 0, yaw: 0, ok: false } };
   /** Pedestrian groups with a bounding circle for distance culling. */
   crowds: { peds: Pedestrians; cx: number; cz: number; r: number }[] = [];
   save = new SaveSystem();
@@ -111,6 +114,8 @@ export class Game {
     this.scene.add(this.view.root);
     this.grass = new Grass(this.data.terrain, GRASS_MAX);
     this.scene.add(this.grass.mesh);
+    this.birds = new Birds();
+    this.scene.add(this.birds.mesh);
     this.scene.add(this.sun, this.sun.target, this.hemi);
     this.scene.fog = new Fog(0xcfe3f2, 120, 520);
     this.build = cloneBuild(this.save.selectedBuild);
@@ -603,6 +608,37 @@ export class Game {
     const knocked = this.view.hitCones(p.x, p.z, b.vel.x, b.vel.z);
     if (knocked) this.audio.impact(0.2, 'bump', 'asphalt');
     this.view.updateCones(dt);
+    // Lake: splash on entry, water drag, and a reset if the bike goes under.
+    const lk = this.data.lake;
+    if (Math.hypot(p.x - lk.x, p.z - lk.z) < lk.r + 14) {
+      const depth = lk.level - (Math.min(b.front.contact.y, b.rear.contact.y));
+      if (depth > 0.05) {
+        const v = Math.hypot(b.vel.x, b.vel.z);
+        if (!this.wet.splashed && v > 2) {
+          this.wet.splashed = true;
+          this.audio.impact(Math.min(1, v / 10), 'land', 'sand');
+          for (let i = 0; i < 24; i++) this.particles.emit(_v2.set(p.x, lk.level + 0.1, p.z), _v.set((Math.random() - 0.5) * 4 + b.vel.x * 0.3, 1.5 + Math.random() * 3, (Math.random() - 0.5) * 4 + b.vel.z * 0.3), [0.85, 0.92, 0.95], 0.4, 1.0, { grow: 1.2, drag: 1.5, gravity: 9, alpha: 0.8 });
+        }
+        if (v > 1.5 && Math.random() < dt * 30) this.particles.emit(_v2.set(p.x, lk.level + 0.05, p.z), _v.set((Math.random() - 0.5) * 2, 0.8 + Math.random(), (Math.random() - 0.5) * 2), [0.9, 0.95, 1], 0.3, 0.7, { grow: 1.5, drag: 2, gravity: 6, alpha: 0.6 });
+        // Water drag grows with depth.
+        const k = Math.min(1, depth / 0.6) * 1.6 * dt;
+        b.vel.x *= 1 - k;
+        b.vel.z *= 1 - k;
+        this.wet.under = depth > 0.75 ? this.wet.under + dt : 0;
+        if (this.wet.under > 1.2) {
+          this.wet.under = 0;
+          this.ui.toast('Splash! Water and electrics don\'t mix. Back to the shore.', 3000);
+          // Back to the last dry spot (the safe-state buffer may hold shallow-water states).
+          const d = this.wet.dry;
+          if (d.ok) b.place(d.x, d.z, d.yaw);
+          else b.reset();
+          this.cam.snap();
+        }
+      } else this.wet.splashed = false;
+    }
+    if (Math.hypot(p.x - lk.x, p.z - lk.z) > lk.r + 8 && !b.crashed && b.rear.grounded && Math.abs(b.lean) < 0.3) {
+      this.wet.dry = { x: p.x, z: p.z, yaw: b.yaw, ok: true };
+    }
     // Pedestrians
     if (this.settings.pedestrians) {
       for (const c of this.crowds) {
@@ -680,6 +716,8 @@ export class Game {
     this.sun.target.position.copy(p);
     this.view.follow(this.camera.position, this.time);
     this.grass.update(this.camera.position, this.time);
+    this.birds.mesh.visible = this.settings.timeOfDay !== 'night';
+    if (this.birds.mesh.visible) this.birds.update(this.time);
     // The crowd lives in the city (x < -35); skip drawing it from far away.
     const cp = this.camera.position;
     for (const c of this.crowds) c.peds.root.visible = this.settings.pedestrians && Math.hypot(cp.x - c.cx, cp.z - c.cz) < c.r + 120;
