@@ -31,6 +31,9 @@ export interface BikeInput {
   steer: number;
   /** +1 = lean forward (weight over the bars), -1 = lean back. */
   lean: number;
+  /** Wheelie / stoppie trick buttons (held = 1). Optional: plain riding leaves them out. */
+  wheelie?: number;
+  stoppie?: number;
 }
 
 export function emptyInput(): BikeInput {
@@ -114,6 +117,9 @@ export class BikeDynamics {
   riderShift = 0;
   riderLat = 0;
   input: BikeInput = emptyInput();
+  /** How long the wheelie / stoppie buttons have been held, s. */
+  wheelieHold = 0;
+  stoppieHold = 0;
   /** User balance assist level 0..1. */
   assist = 0.65;
 
@@ -280,6 +286,43 @@ export class BikeDynamics {
     let leanIn = this.crashed ? 0 : clamp(input.lean, -1, 1);
     const grounded = this.front.grounded || this.rear.grounded;
 
+    // --- Trick buttons -------------------------------------------------------------
+    // WHEELIE: the rider sits back and rides the throttle to a target pitch that rises the
+    // longer the button is held. A short hold gives a controlled wheelie; hold too long and
+    // the target passes the balance point, the bike loops out and the rider falls off the back.
+    // STOPPIE: weight forward and a modulated front brake toward a nose-down target that also
+    // grows with hold time (too long at speed = over the bars).
+    // While a button is held the matching rider instinct and wheelie control are bypassed.
+    const wheelieBtn = !this.crashed && (input.wheelie ?? 0) > 0.5;
+    const stoppieBtn = !this.crashed && !wheelieBtn && (input.stoppie ?? 0) > 0.5;
+    this.wheelieHold = wheelieBtn ? this.wheelieHold + dt : 0;
+    this.stoppieHold = stoppieBtn ? this.stoppieHold + dt : 0;
+    const TR = TUNING.tricks;
+    if (wheelieBtn) {
+      const target = TR.wheelieBase + Math.max(0, this.wheelieHold - TR.holdGrace) * TR.wheelieRamp;
+      const rateUp = -this.angVel.dot(_left);
+      leanIn = -1;
+      fb = 0;
+      rb = 0;
+      thr = this.front.grounded && this.pitch < 0.08
+        ? 1
+        : clamp(TR.wheelieThrottle + (target - this.pitch) * 2.6 - rateUp * 0.45, 0, 1);
+      if (this.pitch > TR.loopOut) {
+        this.crash('looped out');
+        // Off the back: the rider slides off behind the bike.
+        this.rider.vel.addScaledVector(_fwd, -3).add(tv(0, 0.8, 0));
+      }
+    } else if (stoppieBtn) {
+      const target = TR.stoppieBase + Math.max(0, this.stoppieHold - TR.holdGrace) * TR.stoppieRamp;
+      const nose = -this.pitch;
+      const noseRate = Math.max(0, this.angVel.dot(_left));
+      leanIn = 1;
+      thr = 0;
+      rb = 0;
+      fb = this.front.grounded ? clamp(0.7 + (target - nose) * 3 - noseRate * 0.8, 0.1, 0.95) : 0;
+      if (this.front.grounded && nose > TR.overBars) this.crash('over the bars');
+    }
+
     // --- Rider instinct: ease the front brake at the stoppie point and the throttle at the
     // loop-out point, the way a rider modulates by feel. Scaled by assist (0 = none).
     if (!this.crashed && this.assist > 0) {
@@ -287,13 +330,13 @@ export class BikeDynamics {
       // Predict where the pitch is heading (rate look-ahead) so the rider eases off *before*
       // the bike goes over the bars, holding it near the stoppie balance point.
       const prNose = this.angVel.dot(_left); // + = nose diving
-      if (this.front.grounded && fb > 0) {
+      if (this.front.grounded && fb > 0 && !stoppieBtn) {
         const predicted = -this.pitch + Math.max(0, prNose) * R.stoppieLookahead;
         const rearLight = this.rear.grounded ? smoothstep(0.35, 0.1, this.rear.load / (sp.mass * g * 0.5)) : 1;
         const excess = predicted - R.stoppieLimit;
         if (excess > 0) fb *= clamp(1 - excess * 7 * this.assist * Math.max(rearLight, 0.4), 0.05, 1);
       }
-      if (this.rear.grounded && !this.front.grounded) {
+      if (this.rear.grounded && !this.front.grounded && !wheelieBtn) {
         // Look ahead on the pitch rate; past the balance point, cover the rear brake.
         const prUp = -this.angVel.dot(_left);
         const predicted = this.pitch + Math.max(0, prUp) * 0.25;
@@ -394,6 +437,7 @@ export class BikeDynamics {
       brake: Math.max(fb, rb),
       wheelOmega: this.rear.omega,
       rearSlip: this.rear.slipRatio,
+      wheelieOverride: wheelieBtn,
       pitch: this.pitch,
       frontAirborne: !this.front.grounded,
       rearGrounded: this.rear.grounded,

@@ -4,8 +4,9 @@
  */
 import {
   ACESFilmicToneMapping, DirectionalLight, Fog, HemisphereLight, Matrix4, PCFSoftShadowMap, PerspectiveCamera,
-  Quaternion, Scene, SpotLight, SRGBColorSpace, Vector3, WebGLRenderer,
+  PMREMGenerator, Quaternion, Scene, SpotLight, SRGBColorSpace, Vector3, WebGLRenderer,
 } from 'three';
+import type { WebGLRenderTarget } from 'three';
 import { BikeDynamics, emptyInput } from '../physics/bike';
 import { TUNING, SURFACE_PROPS } from '../physics/tuning';
 import { computeVehicleSpec } from '../vehicle/spec';
@@ -19,6 +20,7 @@ import { WorldView } from '../render/worldView';
 import type { Quality } from '../render/worldView';
 import { BikeModel } from '../render/bikeModel';
 import { Particles, TireMarks } from '../render/effects';
+import { Grass } from '../render/grass';
 import { ChaseCamera } from '../camera/chaseCamera';
 import { Input } from '../input/input';
 import { TouchControls } from '../input/touch';
@@ -39,6 +41,7 @@ const QUALITY: Record<Settings['quality'], Quality> = {
   high: { shadows: true, shadowSize: 2048, trees: 520, pixelRatio: 2, drawDistance: 520 },
 };
 
+const GRASS_MAX = 7000;
 const _v = new Vector3(), _v2 = new Vector3(), _m = new Matrix4(), _gl = new Vector3(), _gr = new Vector3();
 
 export class Game {
@@ -63,6 +66,7 @@ export class Game {
   marks: TireMarks;
   particles: Particles;
   peds: Pedestrians;
+  grass: Grass;
   save = new SaveSystem();
   ui!: UI;
   state: GameState = 'menu';
@@ -80,6 +84,10 @@ export class Game {
   private frameTimes: number[] = [];
   private collected = new Set<string>();
   quality: Quality = QUALITY.high;
+  private contextLost = false;
+  /** Adaptive resolution: current pixel ratio between min and the quality preset's max. */
+  private dynPR = 1;
+  private perf = { t: 0, frames: 0, slow: 0, cooldown: 0, ceiling: 99 };
   onFrame: ((dt: number) => void) | null = null;
 
   constructor(private container: HTMLElement) {
@@ -97,6 +105,8 @@ export class Game {
     for (const b of this.data.boxes) this.world.addBox(b);
     this.view = new WorldView(this.data, this.quality);
     this.scene.add(this.view.root);
+    this.grass = new Grass(this.data.terrain, GRASS_MAX);
+    this.scene.add(this.grass.mesh);
     this.scene.add(this.sun, this.sun.target, this.hemi);
     this.scene.fog = new Fog(0xcfe3f2, 120, 520);
     this.build = cloneBuild(this.save.selectedBuild);
@@ -110,12 +120,35 @@ export class Game {
     this.peds = new Pedestrians(this.data.pedPaths, 36, (x, z) => this.world.groundHeight(x, z, 1.5));
     this.scene.add(this.peds.root);
     this.cam = new ChaseCamera(this.camera, this.world);
-    window.addEventListener('resize', () => this.resize());
+    // iOS reports the new size late after rotation / toolbar changes, so resize again shortly after.
+    const deferResize = () => {
+      this.resize();
+      setTimeout(() => this.resize(), 120);
+      setTimeout(() => this.resize(), 500);
+    };
+    window.addEventListener('resize', deferResize);
+    window.addEventListener('orientationchange', deferResize);
+    window.visualViewport?.addEventListener('resize', deferResize);
+    const canvas = this.renderer.domElement;
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      this.contextLost = true;
+      this.ui?.toast('Graphics were paused by the system — restoring…', 4000);
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+      this.contextLost = false;
+      this.applySettings();
+    });
+    window.addEventListener('blur', () => this.touch.releaseAll());
+    window.addEventListener('pagehide', () => void this.save.saveNow());
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
+        this.touch.releaseAll();
         if (this.state === 'ride') this.setState('pause');
         this.audio.suspend();
-        this.save.save();
+        // iOS freezes backgrounded apps almost immediately: write now, not debounced.
+        this.progressSave();
+        void this.save.saveNow();
       } else this.audio.resume();
     });
     this.resize();
@@ -129,6 +162,7 @@ export class Game {
     this.applySettings();
     this.collected = new Set(this.save.data.progress.collected);
     this.view.setCollected(this.collected);
+    this.ui.seedAnnounced();
     this.respawn('hub');
     this.setState('menu');
     if (this.save.warning) this.ui.toast(this.save.warning, 6000);
@@ -142,7 +176,9 @@ export class Game {
   applySettings() {
     const s = this.settings;
     this.quality = QUALITY[s.quality];
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.quality.pixelRatio));
+    this.dynPR = Math.min(window.devicePixelRatio || 1, this.quality.pixelRatio);
+    this.perf.ceiling = 99;
+    this.renderer.setPixelRatio(this.dynPR);
     this.renderer.shadowMap.enabled = this.quality.shadows;
     this.sun.castShadow = this.quality.shadows;
     this.sun.shadow.mapSize.set(this.quality.shadowSize, this.quality.shadowSize);
@@ -156,9 +192,11 @@ export class Game {
     sc.updateProjectionMatrix();
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.03;
+    this.grass.setCount(s.quality === 'low' ? 0 : s.quality === 'medium' ? 3800 : GRASS_MAX);
     this.particles.budget = s.quality === 'low' ? 0.4 : s.quality === 'medium' ? 0.75 : 1;
     this.peds.setCount(s.pedestrians ? (s.quality === 'low' ? 12 : s.quality === 'medium' ? 24 : 36) : 0);
-    this.camera.far = this.quality.drawDistance + 400;
+    this.camera.far = Math.max(this.quality.drawDistance + 400, 950);
+    this.view.cullDistance = this.quality.drawDistance;
     (this.scene.fog as Fog).far = this.quality.drawDistance;
     (this.scene.fog as Fog).near = this.quality.drawDistance * 0.25;
     this.bike.assist = s.assist;
@@ -184,28 +222,45 @@ export class Game {
   }
 
   setTimeOfDay(mode: Settings['timeOfDay']) {
-    const dir = mode === 'day' ? new Vector3(0.45, 0.85, 0.3) : mode === 'sunset' ? new Vector3(-0.8, 0.18, 0.4) : new Vector3(0.3, 0.5, -0.4);
+    const dir = mode === 'day' ? new Vector3(0.5, 0.72, 0.38) : mode === 'sunset' ? new Vector3(-0.8, 0.2, 0.4) : new Vector3(0.3, 0.5, -0.4);
     dir.normalize();
     this.view.setTimeOfDay(mode, dir);
     this.sunDir.copy(dir);
+    this.bakeEnvironment();
     const fog = this.scene.fog as Fog;
     if (mode === 'day') {
-      this.sun.color.set(0xfff4e0); this.sun.intensity = 2.6;
-      this.hemi.color.set(0xcfe3ff); this.hemi.groundColor.set(0x5a5040); this.hemi.intensity = 1.1;
-      fog.color.set(0xcfe3f2); this.renderer.toneMappingExposure = 1.0;
+      this.sun.color.set(0xfff1dc); this.sun.intensity = 2.9;
+      this.hemi.color.set(0xcfe3ff); this.hemi.groundColor.set(0x5a5040); this.hemi.intensity = 0.45;
+      fog.color.set(0xc6dbec); this.renderer.toneMappingExposure = 0.88;
     } else if (mode === 'sunset') {
-      this.sun.color.set(0xffa860); this.sun.intensity = 2.0;
-      this.hemi.color.set(0x8d8fb8); this.hemi.groundColor.set(0x4a3a30); this.hemi.intensity = 0.8;
+      this.sun.color.set(0xffa860); this.sun.intensity = 2.2;
+      this.hemi.color.set(0x8d8fb8); this.hemi.groundColor.set(0x4a3a30); this.hemi.intensity = 0.35;
       fog.color.set(0xd9a477); this.renderer.toneMappingExposure = 1.05;
     } else {
       this.sun.color.set(0x8fa6d6); this.sun.intensity = 0.35;
-      this.hemi.color.set(0x334466); this.hemi.groundColor.set(0x111318); this.hemi.intensity = 0.35;
+      this.hemi.color.set(0x334466); this.hemi.groundColor.set(0x111318); this.hemi.intensity = 0.25;
       fog.color.set(0x0b0f18); this.renderer.toneMappingExposure = 1.15;
     }
+    this.grass.setLighting(this.sun.color, this.sun.intensity, this.hemi.color, this.hemi.intensity + (mode === 'night' ? 0.1 : 0.6));
     this.headlight.intensity = mode === 'night' ? 60 * this.spec.headlight : mode === 'sunset' ? 18 * this.spec.headlight : 0;
     this.headlight.visible = this.headlight.intensity > 0;
   }
   private sunDir = new Vector3(0.45, 0.85, 0.3).normalize();
+  private pmrem: PMREMGenerator | null = null;
+  private envRT: WebGLRenderTarget | null = null;
+
+  /** Bake the current sky into a prefiltered environment map (reflections + soft ambient). */
+  private bakeEnvironment() {
+    this.pmrem ??= new PMREMGenerator(this.renderer);
+    const { scene, dispose } = this.view.envScene();
+    const rt = this.pmrem.fromScene(scene, 0.02, 0.1, 500);
+    dispose();
+    this.envRT?.dispose();
+    this.envRT = rt;
+    this.scene.environment = rt.texture;
+    this.scene.environmentIntensity = this.settings.timeOfDay === 'night' ? 0.35 : 0.85;
+    this.ui?.garage?.setEnvironment(rt.texture);
+  }
 
   /** Switch the active bike to a build (updates physics and model, keeps position). */
   applyBuild(b: BikeBuild, keepPose = true) {
@@ -239,6 +294,7 @@ export class Game {
       this.acc = 0;
       this.audio.resume();
     }
+    if (s !== 'ride' && s !== 'menu') this.audio.quiet();
     this.updateTouchVisibility();
     this.ui?.onState(s, prev);
   }
@@ -273,6 +329,8 @@ export class Game {
     if (this.frameTimes.length > 30) this.frameTimes.shift();
     this.fps = this.frameTimes.length / this.frameTimes.reduce((a, b) => a + b, 0);
     this.time += dt;
+    if (this.contextLost) return;
+    this.adaptResolution(dt);
     if (this.state === 'garage') {
       this.ui.garage.update(dt);
       this.ui.garage.render(this.renderer);
@@ -284,6 +342,41 @@ export class Game {
     this.renderer.render(this.scene, this.camera);
     this.onFrame?.(dt);
   };
+
+  /**
+   * Keep frame rate up on phones: drop the render resolution when frames are slow, creep back
+   * up when there is headroom. A resolution that proved too slow becomes a ceiling, so the
+   * game does not oscillate. Only runs while riding (menus/garage are not representative).
+   */
+  private adaptResolution(dt: number) {
+    if (this.state !== 'ride' || !this.settings.adaptiveResolution) return;
+    const p = this.perf;
+    p.t += dt;
+    p.frames++;
+    if (dt > 1 / 45) p.slow++;
+    if (p.cooldown > 0) p.cooldown -= dt;
+    if (p.t < 2) return;
+    const slowFrac = p.slow / p.frames;
+    p.t = p.frames = p.slow = 0;
+    if (p.cooldown > 0) return;
+    const max = Math.min(window.devicePixelRatio || 1, this.quality.pixelRatio, p.ceiling);
+    const min = Math.min(max, this.settings.quality === 'low' ? 0.85 : 1);
+    let next = this.dynPR;
+    if (slowFrac > 0.25) {
+      p.ceiling = Math.min(p.ceiling, this.dynPR - 0.01);
+      next = Math.max(min, this.dynPR * 0.85);
+    } else if (slowFrac < 0.02 && this.dynPR < max) next = Math.min(max, this.dynPR + 0.1);
+    if (Math.abs(next - this.dynPR) > 0.01) {
+      this.dynPR = next;
+      this.renderer.setPixelRatio(next);
+      this.resize();
+      p.cooldown = 3;
+    }
+  }
+
+  get renderScale() {
+    return this.dynPR;
+  }
 
   private menuUpdate(dt: number) {
     // Idle bike with a slow orbiting camera behind the menu.
@@ -359,7 +452,8 @@ export class Game {
       else if (e.type === 'crash') {
         this.audio.impact(1, 'crash');
         this.cam.bump(0.8);
-        this.ui.toast('Crashed! Press R / ⟲ to reset (auto in 3 s)', 2500);
+        const why = e.cause === 'looped out' ? 'Looped out! You held the wheelie too long. ' : e.cause === 'over the bars' ? 'Over the bars! ' : 'Crashed! ';
+        this.ui.toast(`${why}Press R / ⟲ to reset (auto in 3 s)`, 2800);
       }
     }
     this.bike.events.length = 0;
@@ -391,6 +485,10 @@ export class Game {
       city: this.renderPos.x < -30 && Math.abs(this.renderPos.z) < 200 ? 1 : 0,
       paused: false,
     }, dt);
+    if (this.touch.isVisible) {
+      // Danger meter: full at roughly the hold time where the bikes loop out (~2.8 s).
+      this.touch.setWheelieHold(b.wheelieHold > 0 ? (b.wheelieHold - 0.6) / 2.2 : 0);
+    }
     this.ui.hud.update(dt);
   }
 
@@ -494,6 +592,7 @@ export class Game {
     if (!this.launch.armed && Math.abs(b.speed) < 0.3 && b.front.grounded && b.rear.grounded) this.launch = { armed: true, t: 0, done: false };
     if (this.launch.armed) {
       if (b.speed > 0.3) this.launch.t += dt;
+      else if (Math.abs(b.speed) < 0.3) this.launch.t = 0;
       if (b.crashed || b.input.frontBrake > 0.3) this.launch.armed = false;
       if (kmh >= 50 && this.launch.t > 0) {
         const id = this.build.id;
@@ -511,8 +610,7 @@ export class Game {
     this.distanceSaveTimer += dt;
     if (this.distanceSaveTimer > 10) {
       this.distanceSaveTimer = 0;
-      this.save.data.progress.distance = b.distance;
-      this.save.data.progress.bestDrift = Math.max(this.save.data.progress.bestDrift, Math.round(this.scorer.bestDrift));
+      this.progressSave();
       this.save.save();
     }
     // Challenge completion bookkeeping
@@ -539,12 +637,26 @@ export class Game {
     }
   }
 
+  private lastBikeDistance = 0;
+  /** Fold odometer and best drift into saved progress (lifetime totals). */
+  private progressSave() {
+    const b = this.bike;
+    if (b.distance < this.lastBikeDistance) this.lastBikeDistance = 0;
+    this.save.data.progress.distance += b.distance - this.lastBikeDistance;
+    this.lastBikeDistance = b.distance;
+    this.save.data.progress.bestDrift = Math.max(this.save.data.progress.bestDrift, Math.round(this.scorer.bestDrift));
+  }
+
   private updateEnvironment(_dt: number) {
     // Shadow camera follows the bike.
     const p = this.renderPos;
     this.sun.position.copy(p).addScaledVector(this.sunDir, 80);
     this.sun.target.position.copy(p);
-    this.view.sky.position.copy(this.camera.position);
+    this.view.follow(this.camera.position, this.time);
+    this.grass.update(this.camera.position, this.time);
+    // The crowd lives in the city (x < -35); skip drawing it from far away.
+    const cp = this.camera.position;
+    this.peds.root.visible = this.settings.pedestrians && cp.x < 120 && Math.abs(cp.z) < 420;
   }
 
   get challenges() {

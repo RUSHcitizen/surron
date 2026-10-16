@@ -6,7 +6,7 @@ import {
   AmbientLight, CircleGeometry, Color, DirectionalLight, Mesh, MeshStandardMaterial, PerspectiveCamera,
   PlaneGeometry, PointLight, RepeatWrapping, Scene, SpotLight, Vector3,
 } from 'three';
-import type { WebGLRenderer } from 'three';
+import type { Texture, WebGLRenderer } from 'three';
 import type { Game } from '../game/game';
 import { BikeModel } from '../render/bikeModel';
 import { floorTexture } from '../render/textures';
@@ -148,6 +148,8 @@ export class Garage {
     this.el.style.display = '';
     this.renderPanels();
     this.resize(window.innerWidth, window.innerHeight);
+    // Layout may settle a frame later (fonts, safe areas).
+    requestAnimationFrame(() => this.resize(window.innerWidth, window.innerHeight));
   }
 
   hide() {
@@ -155,10 +157,38 @@ export class Garage {
     this.el.style.display = 'none';
   }
 
+  setEnvironment(t: Texture) {
+    this.scene.environment = t;
+    this.scene.environmentIntensity = 0.55;
+  }
+
+  /**
+   * Frame the bike in the part of the screen not covered by panels: shift the projection
+   * centre to the middle of the free area and pull back when that area is narrow.
+   */
   resize(w: number, hgt: number) {
     this.camera.aspect = w / hgt;
+    this.camera.clearViewOffset();
+    this.fit = 1;
+    const center = this.el.querySelector<HTMLElement>('.g-center');
+    if (this.open && center && w > 0 && hgt > 0) {
+      const r = center.getBoundingClientRect();
+      const btns = center.querySelector<HTMLElement>('.btn-row')?.getBoundingClientRect();
+      // Free area: the centre column, minus a button row at its top (phones) or bottom.
+      let top = r.top, bottom = r.bottom;
+      if (btns && btns.height > 0) {
+        if (btns.top - r.top < r.bottom - btns.bottom) top = Math.max(top, btns.bottom);
+        else bottom = Math.min(bottom, btns.top);
+      }
+      if (r.width > 40 && bottom - top > 40) {
+        const cx = (r.left + r.right) / 2, cy = (top + bottom) / 2;
+        this.camera.setViewOffset(w, hgt, w / 2 - cx, hgt / 2 - cy, w, hgt);
+        this.fit = Math.max(1, Math.min(2.2, Math.max((w * 0.62) / r.width, (hgt * 0.7) / (bottom - top))));
+      }
+    }
     this.camera.updateProjectionMatrix();
   }
+  private fit = 1;
 
   /** Recompute spec/estimates and rebuild the preview model. */
   private refresh(immediate = false) {
@@ -197,7 +227,8 @@ export class Garage {
     });
     this.model.root.updateMatrixWorld(true);
     this.model.rider.root.visible = false;
-    this.camera.position.set(Math.sin(o.yaw) * Math.cos(o.pitch) * o.dist, target.y + Math.sin(o.pitch) * o.dist, Math.cos(o.yaw) * Math.cos(o.pitch) * o.dist);
+    const dist = o.dist * this.fit;
+    this.camera.position.set(Math.sin(o.yaw) * Math.cos(o.pitch) * dist, target.y + Math.sin(o.pitch) * dist, Math.cos(o.yaw) * Math.cos(o.pitch) * dist);
     this.camera.lookAt(target);
   }
 
@@ -378,7 +409,7 @@ export class Garage {
             wrap.append(s);
           }
           const custom = h('input', { type: 'color', class: 'sw-custom', value: V[key] as string, 'aria-label': `${label} custom colour` }) as HTMLInputElement;
-          custom.addEventListener('input', () => this.change((d) => ((d.visual as unknown as Record<string, string>)[key] = custom.value)));
+          custom.addEventListener('change', () => this.change((d) => ((d.visual as unknown as Record<string, string>)[key] = custom.value)));
           wrap.append(custom);
           return h('div', {}, h('div', { class: 'row-label', style: 'margin-top:8px' }, label), wrap);
         };
@@ -420,7 +451,7 @@ export class Garage {
         h('span', { class: 'nm' }, bd.name),
         cmp,
         h('button', { class: 'btn small', onclick: () => this.loadBuild(bd) }, 'Load'),
-        h('button', { class: 'btn small', onclick: () => download(`${bd.name.replace(/\W+/g, '-')}.voltline.json`, exportBuild(bd)) }, 'Export'),
+        h('button', { class: 'btn small', onclick: () => download(`${bd.name.replace(/\W+/g, '-')}.varg.json`, exportBuild(bd)) }, 'Export'),
         h('button', { class: 'btn small danger', disabled: save.data.builds.length <= 1, onclick: () => this.deleteBuild(bd.id) }, '✕'),
       ));
     }
@@ -651,6 +682,18 @@ export class Garage {
     if (!confirm('Delete this build?')) return;
     s.data.builds = s.data.builds.filter((b) => b.id !== id);
     if (s.data.selectedBuildId === id) s.data.selectedBuildId = s.data.builds[0].id;
+    delete s.data.progress.measured[id];
+    // Keep the bike being ridden and the draft in step with the save.
+    if (this.game.build.id === id) this.game.applyBuild(s.selectedBuild);
+    if (this.draft.id === id) {
+      this.draft = cloneBuild(s.selectedBuild);
+      this.dirty = false;
+      this.refresh(true);
+      this.baseline = this.est;
+      s.save();
+      this.renderPanels();
+      return;
+    }
     s.save();
     this.renderBody();
   }

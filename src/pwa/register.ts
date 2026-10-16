@@ -12,7 +12,7 @@ export function registerServiceWorker() {
             // A new version is cached; it activates on the next launch.
             const t = document.createElement('div');
             t.className = 'toast';
-            t.textContent = 'Update downloaded — it will apply next time you open Voltline.';
+            t.textContent = 'Update downloaded — it will apply next time you open Stark Varg EBike.';
             document.querySelector('.toasts')?.append(t);
             setTimeout(() => t.remove(), 5000);
           }

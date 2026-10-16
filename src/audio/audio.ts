@@ -48,7 +48,7 @@ export class AudioEngine {
   /** Must be called from a user gesture handler. */
   async unlock() {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') await this.ctx.resume().catch(() => {});
+      if (this.ctx.state !== 'running' && !this.suspendedByGame) await this.ctx.resume().catch(() => {});
       return;
     }
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -181,11 +181,20 @@ export class AudioEngine {
     this.ambBus.gain.setTargetAtTime(this.volumes.ambience, t, 0.05);
   }
 
+  /** True while the game deliberately paused audio (app hidden). */
+  private suspendedByGame = false;
   suspend() {
+    this.suspendedByGame = true;
     this.ctx?.suspend().catch(() => {});
   }
   resume() {
+    this.suspendedByGame = false;
     this.ctx?.resume().catch(() => {});
+  }
+
+  /** Fade all riding voices out (pause, garage, results screens). */
+  quiet() {
+    this.update({ rpm: 0, load: 0, speed: 0, slip: 0, surface: 'concrete', grounded: true, distance: 6, whine: 1, pwm: 1, city: 0, paused: true }, 0);
   }
 
   update(f: AudioFrame, dt: number) {

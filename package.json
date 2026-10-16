@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Voltline: an original electric dirt-bike sandbox game for the browser",
+  "description": "Stark Varg EBike: an electric dirt-bike sandbox game for the browser",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

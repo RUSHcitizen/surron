@@ -20,9 +20,26 @@ function tex(c: HTMLCanvasElement, repeat = false, srgb = true): CanvasTexture {
 }
 
 const cache = new Map<string, Texture>();
+/** Per-build textures (livery, plate) are keyed by colour/number, so they are kept in a small LRU. */
+const LRU_PREFIXES = ['livery-', 'plate-'];
+const LRU_MAX = 12;
 function cached<T extends Texture>(key: string, make: () => T): T {
   let t = cache.get(key) as T | undefined;
-  if (!t) cache.set(key, (t = make()));
+  if (t) {
+    // Refresh recency.
+    cache.delete(key);
+    cache.set(key, t);
+    return t;
+  }
+  cache.set(key, (t = make()));
+  if (LRU_PREFIXES.some((p) => key.startsWith(p))) {
+    const lru = [...cache.keys()].filter((k) => LRU_PREFIXES.some((p) => k.startsWith(p)));
+    // Evicted textures are disposed (GPU memory freed); if still in use three.js re-uploads them.
+    for (const k of lru.slice(0, Math.max(0, lru.length - LRU_MAX))) {
+      cache.get(k)?.dispose();
+      cache.delete(k);
+    }
+  }
   return t;
 }
 
@@ -196,11 +213,11 @@ export function liveryTexture(base: string, decal: string, decalColor: string, a
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.fillText(number, 390, 96);
-    // brand-neutral wordmark
+    // wordmark
     g.fillStyle = accent;
     g.font = 'italic 900 34px system-ui, sans-serif';
     g.textAlign = 'left';
-    g.fillText('VOLTLINE', 40, 60);
+    g.fillText('STARK VARG', 40, 60);
     return tex(c);
   });
 }
@@ -247,6 +264,159 @@ export function floorTexture(): CanvasTexture {
     for (let i = 0; i <= 4; i++) {
       g.beginPath(); g.moveTo(i * 64, 0); g.lineTo(i * 64, 256); g.stroke();
       g.beginPath(); g.moveTo(0, i * 64); g.lineTo(256, i * 64); g.stroke();
+    }
+    return tex(c, true);
+  });
+}
+
+export type FacadeStyle = 'brick' | 'office' | 'apartment' | 'stucco' | 'shop';
+
+/**
+ * Building façade set for one style: colour map, night emissive mask and an ORM map
+ * (G = roughness, B = metalness) so glass is glossy and reflects the sky while walls stay
+ * matte. One texture tile = one window bay × one floor. The top-left corner is always plain
+ * wall: roofs sample it.
+ */
+export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: CanvasTexture; orm: CanvasTexture } {
+  return cached(`facade-${style}`, () => {
+    const S = 256;
+    const col = canvas(S, S), em = canvas(S, S), orm = canvas(S, S);
+    const g = col.g, e = em.g, o = orm.g;
+    const r = mulberry32(style.length * 97 + 13);
+    e.fillStyle = '#000';
+    e.fillRect(0, 0, S, S);
+    o.fillStyle = 'rgb(0,235,0)';
+    o.fillRect(0, 0, S, S);
+    const glass = (x: number, y: number, w: number, h: number, warm = false) => {
+      const gr = g.createLinearGradient(x, y, x + w * 0.4, y + h);
+      gr.addColorStop(0, warm ? '#6d5a44' : '#7d97ad');
+      gr.addColorStop(0.5, warm ? '#3e3226' : '#3a4d5e');
+      gr.addColorStop(1, warm ? '#2b231b' : '#26323d');
+      g.fillStyle = gr;
+      g.fillRect(x, y, w, h);
+      // Sky reflection streak.
+      g.fillStyle = 'rgba(255,255,255,0.10)';
+      g.beginPath();
+      g.moveTo(x + w * 0.15, y); g.lineTo(x + w * 0.4, y); g.lineTo(x + w * 0.1, y + h); g.lineTo(x - w * 0.15 + 1, y + h);
+      g.closePath();
+      g.fill();
+      o.fillStyle = 'rgb(0,30,170)';
+      o.fillRect(x, y, w, h);
+      if (r() < 0.3) {
+        e.fillStyle = r() < 0.5 ? '#ffd890' : '#ffe9c2';
+        e.fillRect(x, y, w, h);
+      }
+    };
+    const frame = (x: number, y: number, w: number, h: number, c: string, t: number) => {
+      g.fillStyle = c;
+      g.fillRect(x - t, y - t, w + 2 * t, t);
+      g.fillRect(x - t, y + h, w + 2 * t, t);
+      g.fillRect(x - t, y, t, h);
+      g.fillRect(x + w, y, t, h);
+    };
+    if (style === 'brick') {
+      g.fillStyle = '#9a5b45';
+      g.fillRect(0, 0, S, S);
+      for (let y = 0; y < S; y += 8) {
+        const off = (y / 8) % 2 ? 0 : 12;
+        for (let x = -24; x < S; x += 24) {
+          const v = 0.85 + r() * 0.3;
+          g.fillStyle = `rgb(${Math.round(150 * v)},${Math.round(84 * v)},${Math.round(62 * v)})`;
+          g.fillRect(x + off + 1, y + 1, 22, 6);
+        }
+      }
+      glass(78, 56, 100, 130);
+      frame(78, 56, 100, 130, '#ece6da', 7);
+      g.fillStyle = '#ece6da';
+      g.fillRect(126, 56, 4, 130);
+      g.fillRect(78, 118, 100, 4);
+      g.fillStyle = '#c9c1b2';
+      g.fillRect(66, 196, 124, 10); // sill
+      g.fillRect(70, 34, 116, 12); // lintel
+    } else if (style === 'office') {
+      g.fillStyle = '#c9ced4';
+      g.fillRect(0, 0, S, S);
+      glass(6, 6, S - 12, S - 66);
+      g.fillStyle = '#2b3138';
+      g.fillRect(6, S - 56, S - 12, 50); // spandrel
+      o.fillStyle = 'rgb(0,60,120)';
+      o.fillRect(6, S - 56, S - 12, 50);
+      g.fillStyle = '#c9ced4';
+      g.fillRect(126, 0, 4, S);
+    } else if (style === 'apartment') {
+      g.fillStyle = '#f2f0ea';
+      g.fillRect(0, 0, S, S);
+      glass(40, 40, 176, 120);
+      frame(40, 40, 176, 120, '#ffffff', 5);
+      g.fillStyle = '#ffffff';
+      g.fillRect(126, 40, 4, 120);
+      // Balcony slab + rail.
+      g.fillStyle = '#d8d4cc';
+      g.fillRect(20, 214, 216, 14);
+      g.fillStyle = '#4a4f57';
+      g.fillRect(20, 172, 216, 4);
+      for (let x = 24; x < 236; x += 12) g.fillRect(x, 172, 3, 42);
+    } else if (style === 'stucco') {
+      g.fillStyle = '#f4efe6';
+      g.fillRect(0, 0, S, S);
+      for (let i = 0; i < 400; i++) {
+        g.fillStyle = `rgba(0,0,0,${r() * 0.04})`;
+        g.fillRect(r() * S, r() * S, 3, 3);
+      }
+      glass(96, 40, 64, 160);
+      frame(96, 40, 64, 160, '#ffffff', 5);
+      g.fillStyle = '#2f5d4a'; // shutters
+      g.fillRect(58, 36, 32, 168);
+      g.fillRect(166, 36, 32, 168);
+      g.fillStyle = 'rgba(0,0,0,0.25)';
+      for (let y = 44; y < 200; y += 10) { g.fillRect(60, y, 28, 2); g.fillRect(168, y, 28, 2); }
+      g.fillStyle = '#e1d8c8';
+      g.fillRect(88, 206, 80, 10);
+    } else {
+      // Shopfront: sign band, big display window with a lit interior, door on the right.
+      g.fillStyle = '#3a3d44';
+      g.fillRect(0, 0, S, S);
+      g.fillStyle = '#23262b';
+      g.fillRect(0, 0, S, 46);
+      g.fillStyle = '#d9d4c7';
+      for (let i = 0; i < 5; i++) g.fillRect(24 + i * 22 + r() * 6, 16, 14, 14); // sign lettering blocks
+      glass(10, 60, 170, 170, true);
+      e.fillStyle = '#ffcf8a';
+      e.fillRect(10, 60, 170, 170);
+      g.fillStyle = 'rgba(255,220,170,0.35)';
+      g.fillRect(10, 200, 170, 30); // interior counter glow
+      frame(10, 60, 170, 170, '#1b1d21', 5);
+      glass(198, 80, 48, 160, true);
+      frame(198, 80, 48, 160, '#1b1d21', 4);
+      g.fillStyle = '#9a9ea6';
+      g.fillRect(0, 240, S, 16); // kick plate
+    }
+    // Plain wall corner for roofs (top-left 10 px).
+    if (style !== 'office') {
+      g.fillStyle = style === 'brick' ? '#8a5644' : style === 'shop' ? '#3a3d44' : '#ece8e0';
+      g.fillRect(0, 0, 10, 10);
+    }
+    const t = tex(col.c, true);
+    const te = tex(em.c, true);
+    const to = tex(orm.c, true, false);
+    t.anisotropy = te.anisotropy = to.anisotropy = 8;
+    return { map: t, emissive: te, orm: to } as unknown as Texture;
+  }) as unknown as { map: CanvasTexture; emissive: CanvasTexture; orm: CanvasTexture };
+}
+
+/** Corrugated sheet metal (warehouses, shipping containers); grey-scale, tinted by vertex colour. */
+export function corrugatedTexture(): CanvasTexture {
+  return cached('corrugated', () => {
+    const { c, g } = canvas(128, 128);
+    for (let x = 0; x < 128; x++) {
+      const v = 0.72 + 0.28 * Math.sin((x / 16) * Math.PI * 2);
+      g.fillStyle = `rgb(${Math.round(255 * v)},${Math.round(255 * v)},${Math.round(255 * v)})`;
+      g.fillRect(x, 0, 1, 128);
+    }
+    const r = mulberry32(21);
+    for (let i = 0; i < 40; i++) {
+      g.fillStyle = `rgba(80,60,40,${r() * 0.08})`;
+      g.fillRect(r() * 128, r() * 128, 2 + r() * 10, 2 + r() * 30);
     }
     return tex(c, true);
   });

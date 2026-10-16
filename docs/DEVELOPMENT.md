@@ -76,16 +76,25 @@ instead of exploding it.
 - [x] IndexedDB saves (versioned, migration, corruption-safe, fallbacks).
 - [x] PWA: manifest, icons, generated precaching service worker, offline fallback, cache versioning.
 - [x] Cloudflare Pages config (`_headers`, `wrangler.toml`, docs).
-- [x] 41 unit/scenario tests and 7 e2e tests passing, including an offline reload.
+- [x] 44 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] Round 2:
+  - [x] Bug audit fixes: garage texture leak, Reset everything, immediate saves on backgrounding, audio silenced off-ride,
+        Long Jump stale result, unlock re-announcements, hidden pedestrians colliding, stuck rebinds, lifetime odometer,
+        SW shell/asset mismatch, deleting the active build.
+  - [x] iPhone: floating stick, slide-between buttons, per-finger aggregation, iOS audio unlock (touchend), pinch/callout
+        blocking, rotation resize, context-loss handling, adaptive resolution, compact phone menus, garage framing.
+  - [x] Graphics: sculpted bodywork, IBL, clouds, mountains, splatted terrain, grass, organic trees, articulated
+        pedestrians, styled city buildings, track/hub dressing.
+  - [x] Wheelie/stoppie trick buttons (`TUNING.tricks`), renamed to Stark Varg EBike.
 
 ### Known limitations
-- Not tested on a real iPhone, or on real GPU hardware. Only headless Chromium with SwiftShader was available.
-  The measured CPU cost is ~0.2 ms physics + ~0.2 ms systems per frame; there are ~180 draw calls and ~130k triangles on High.
+- Not tested on a real iPhone, or on real GPU hardware. Only headless Chromium with SwiftShader was available (no WebKit
+  build could be downloaded in the dev container). Measured render load at an iPhone-15-sized viewport on Medium: about
+  180–220 draw calls and 370–550k triangles per frame (shadow pass included); High adds grass density and shadow detail.
 - Not deployed to Cloudflare. No credentials were available; the steps are in the README.
 - Visuals are low-poly and procedural:
-  - The rider is a simple IK mannequin.
-  - Buildings are textured boxes.
-  - The MX track is carved terrain without edge markers or banners.
+  - People are smooth procedural figures, not scanned/skinned characters.
+  - Buildings are detailed boxes (no interiors, no curved architecture).
 - Physics:
   - Wheel hop and chatter are approximated (massless wheels).
   - There is no gyroscopic precession of the chassis body.

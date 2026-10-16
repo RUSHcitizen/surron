@@ -38,17 +38,11 @@ self.addEventListener('fetch', (event) => {
       (async () => {
         const cache = await caches.open(CACHE);
         const cached = (await cache.match('./')) || (await cache.match('./index.html'));
-        const network = fetch(req)
-          .then((res) => {
-            if (res.ok && url.pathname.endsWith('/')) cache.put('./', res.clone());
-            return res;
-          })
-          .catch(() => null);
-        if (cached) {
-          event.waitUntil(network);
-          return cached;
-        }
-        return (await network) || (await cache.match('./offline.html')) || new Response('Offline', { status: 503 });
+        // The cached shell always matches this worker's precached assets. Updates arrive as a
+        // new worker with its own complete precache, never by patching this one's index.
+        if (cached) return cached;
+        const network = await fetch(req).catch(() => null);
+        return network || (await cache.match('./offline.html')) || new Response('Offline', { status: 503 });
       })(),
     );
     return;

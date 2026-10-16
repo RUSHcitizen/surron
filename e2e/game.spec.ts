@@ -8,6 +8,8 @@ const gameWait = async (page: Page, secs: number) => {
   await page.waitForFunction((t) => (window as any).voltline.time > t, t0 + secs, { timeout: 60_000 });
 };
 const evalGame = <T>(page: Page, fn: string) => page.evaluate(`(()=>{const g=window.voltline;${fn}})()`) as Promise<T>;
+/** Software-rendered CI (SwiftShader) is very slow at High; riding tests use the Low preset. */
+const lowQuality = (page: Page) => evalGame(page, 'g.settings.quality="low"; g.applySettings(); return 1');
 
 test('boots without console errors and shows the menu', async ({ page }) => {
   const errors: string[] = [];
@@ -23,6 +25,7 @@ test('boots without console errors and shows the menu', async ({ page }) => {
 test('keyboard riding, reset and pause', async ({ page }) => {
   await page.goto('/');
   await ready(page);
+  await lowQuality(page);
   await page.getByRole('button', { name: 'Ride — free roam' }).click();
   await page.keyboard.down('KeyW');
   await gameWait(page, 3);
@@ -36,8 +39,7 @@ test('keyboard riding, reset and pause', async ({ page }) => {
   await page.keyboard.up('KeyW');
   await evalGame(page, 'g.bike.crash("test"); return 1');
   await page.keyboard.press('KeyR');
-  await page.waitForTimeout(500);
-  expect(await evalGame<boolean>(page, 'return g.bike.crashed')).toBe(false);
+  await page.waitForFunction(() => (window as any).voltline.bike.crashed === false, null, { timeout: 30_000 });
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
 });
@@ -63,12 +65,14 @@ test('garage edits change stats, persist across reload and apply to the ride', a
 });
 
 test('drag strip challenge completes and records a measured result', async ({ page }) => {
+  test.setTimeout(300_000);
   await page.goto('/');
   await ready(page);
+  await lowQuality(page);
   await evalGame(page, 'g.startChallenge(g.challenges.find(c=>c.id==="drag")); return 1');
   await page.keyboard.down('KeyW');
   await page.keyboard.down('KeyE'); // lean forward to keep the front down
-  await page.waitForFunction(() => { const c = (window as any).voltline.challenge; return c && (c.state === 'done' || c.state === 'failed'); }, null, { timeout: 60_000 });
+  await page.waitForFunction(() => { const c = (window as any).voltline.challenge; return c && (c.state === 'done' || c.state === 'failed'); }, null, { timeout: 240_000 });
   await page.keyboard.up('KeyW');
   const r = await evalGame<{ state: string; result: number; rec: any }>(page, 'return {state:g.challenge.state,result:g.challenge.result,rec:g.save.data.progress.measured[g.build.id]}');
   expect(r.state).toBe('done');

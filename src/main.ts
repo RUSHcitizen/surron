@@ -14,7 +14,7 @@ function webglAvailable() {
 async function boot() {
   const msg = document.getElementById('boot-msg');
   if (!webglAvailable()) {
-    if (msg) msg.textContent = 'This device or browser does not support WebGL, which Voltline needs.';
+    if (msg) msg.textContent = 'This device or browser does not support WebGL, which Stark Varg EBike needs.';
     return;
   }
   // Let the boot screen paint before the (synchronous) world generation.

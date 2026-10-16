@@ -34,6 +34,7 @@ export class Scorer {
 
   reset() {
     this.total = this.driftTotal = this.chain = 0;
+    this.longestJump = this.lastJump = 0;
     this.multiplier = 1;
     this.events = [];
     this.live = null;

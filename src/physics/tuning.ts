@@ -114,6 +114,23 @@ export const TUNING = {
     slideLimit: 0.55,
   },
 
+  /** Wheelie / stoppie trick buttons (see BikeDynamics.step). Pitch in rad, times in s. */
+  tricks: {
+    /** Initial target pitch for the wheelie button (a comfortable wheelie). */
+    wheelieBase: 0.5,
+    /** Hold time before the target starts creeping up. */
+    holdGrace: 1.5,
+    /** Target pitch increase per second of holding after the grace time. */
+    wheelieRamp: 0.33,
+    /** Base throttle used to hold the wheelie. */
+    wheelieThrottle: 0.45,
+    /** Pitch at which the rider can no longer save it and falls off the back. */
+    loopOut: 1.22,
+    stoppieBase: 0.16,
+    stoppieRamp: 0.22,
+    /** Nose-down pitch at which a held stoppie goes over the bars. */
+    overBars: 0.95,
+  },
   crash: {
     /** Lean angle (rad) past which a grounded bike is considered down. */
     lean: 1.2,

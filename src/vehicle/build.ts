@@ -83,7 +83,7 @@ export const SPROCKET_REAR_RANGE = [36, 66] as const;
 export function defaultBuild(): BikeBuild {
   return {
     id: 'scout',
-    name: 'Volt Scout',
+    name: 'Varg Scout',
     updated: 0,
     parts: {
       motor: 'arc6', controller: 'stock60', battery: 'stock60', fork: 'stock', shock: 'stock', swingarm: 'stock',
@@ -116,28 +116,28 @@ function preset(id: string, name: string, mut: (b: BikeBuild) => void): BikeBuil
 /** Factory presets. Original designs; each one demonstrates a different handling character. */
 export const PRESETS: BikeBuild[] = [
   defaultBuild(),
-  preset('mudlark', 'Mudlark MX', (b) => {
+  preset('mudlark', 'Varg MX', (b) => {
     Object.assign(b.parts, { motor: 'brick10', controller: 'trail90', battery: 'stock60', fork: 'enduro', shock: 'enduro', handlebar: 'mx', seat: 'mx', fenders: 'high', bodyKit: 'armor' });
     b.front = { diameter: 21, width: 80, profile: 100, tread: 'knobby', compound: 'soft', pressure: 14 };
     b.rear = { diameter: 18, width: 120, profile: 100, tread: 'knobby', compound: 'soft', pressure: 13 };
     Object.assign(b.tuning, { frontSprocket: 11, rearSprocket: 52, forkSpring: 0.95, shockSpring: 0.95, tractionControl: true });
     Object.assign(b.visual, { plasticColor: '#ff6b1a', accentColor: '#1b1d22', decal: 'chevron', decalColor: '#1b1d22', number: '412', rimColor: '#c0c4cc', finish: 'satin' });
   }),
-  preset('hornet', 'Asphalt Hornet SM', (b) => {
+  preset('hornet', 'Varg SM', (b) => {
     Object.assign(b.parts, { motor: 'spin12', controller: 'race150', battery: 'volt72', fork: 'sm', shock: 'sm', yoke: 'stable', handlebar: 'flat', fenders: 'short', bodyKit: 'stock', brakes: 'quad', rimStyle: 'cast' });
     b.front = { diameter: 17, width: 110, profile: 70, tread: 'street', compound: 'soft', pressure: 28 };
     b.rear = { diameter: 17, width: 140, profile: 70, tread: 'street', compound: 'soft', pressure: 28 };
     Object.assign(b.tuning, { frontSprocket: 13, rearSprocket: 46, forkSpring: 1.1, shockSpring: 1.1, forkCompression: 13, shockCompression: 13, regen: 0.7 });
     Object.assign(b.visual, { plasticColor: '#ffc914', accentColor: '#1b1d22', frameColor: '#3a3f48', decal: 'bolt', decalColor: '#1b1d22', number: '08', rimColor: '#ffc914', finish: 'gloss' });
   }),
-  preset('dart', 'Drift Dart', (b) => {
+  preset('dart', 'Varg Drift', (b) => {
     Object.assign(b.parts, { motor: 'brick10', controller: 'race150', battery: 'volt72', fork: 'sm', shock: 'stock', swingarm: 'ext60', yoke: 'stable', fenders: 'short', brakes: 'quad' });
     b.front = { diameter: 17, width: 110, profile: 70, tread: 'street', compound: 'soft', pressure: 26 };
     b.rear = { diameter: 17, width: 120, profile: 70, tread: 'street', compound: 'hard', pressure: 32 };
     Object.assign(b.tuning, { frontSprocket: 12, rearSprocket: 50, regen: 0.2, throttleMap: 'aggressive' });
     Object.assign(b.visual, { plasticColor: '#ff4fa3', accentColor: '#00e5ff', frameColor: '#e8e8ea', decal: 'stripes', decalColor: '#00e5ff', number: '77', rimColor: '#e8e8ea', finish: 'metallic' });
   }),
-  preset('mule', 'Stunt Mule', (b) => {
+  preset('mule', 'Varg Stunt', (b) => {
     Object.assign(b.parts, { motor: 'monster22', controller: 'apex300', battery: 'hyper84', fork: 'enduro', shock: 'enduro', swingarm: 'short', handlebar: 'mx', frame: 'reinforced', bodyKit: 'armor', brakes: 'race' });
     b.front = { diameter: 19, width: 80, profile: 100, tread: 'dualsport', compound: 'medium', pressure: 18 };
     b.rear = { diameter: 18, width: 120, profile: 100, tread: 'dualsport', compound: 'soft', pressure: 16 };

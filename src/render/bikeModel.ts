@@ -3,11 +3,12 @@
  * so every geometric change (wheel size, swingarm, fork, battery, gearing...) is visible.
  */
 import {
-  BoxGeometry, CatmullRomCurve3, CircleGeometry, Color, CylinderGeometry, DoubleSide, Group, InstancedMesh, Matrix4,
-  Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, PlaneGeometry, Quaternion, SphereGeometry, TorusGeometry,
-  TubeGeometry, Vector3,
+  BoxGeometry, CapsuleGeometry, CatmullRomCurve3, Float32BufferAttribute, CircleGeometry, Color, Curve, CylinderGeometry, DoubleSide, ExtrudeGeometry,
+  Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, Object3D, Quaternion,
+  Shape, SphereGeometry, TorusGeometry, TubeGeometry, Vector2, Vector3,
 } from 'three';
 import type { BufferGeometry, Material } from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { BikeBuild } from '../vehicle/build';
 import type { VehicleSpec, V3 } from '../vehicle/spec';
 import { BODY_KITS, FENDERS, FINISHES, LIGHTS, RIM_STYLES, byId } from '../vehicle/parts';
@@ -33,13 +34,68 @@ export interface BikeVisualState {
   riderRot?: Quaternion;
 }
 
-/** Place a unit-height (Y) mesh between two points. */
-function between(m: Object3D, a: Vector3, b: Vector3, scaleXZ = 1) {
+/** Place a Y-aligned mesh (height `nominal`, centred) between two points. */
+function between(m: Object3D, a: Vector3, b: Vector3, scaleXZ = 1, nominal = 1) {
   _bt.subVectors(b, a);
   const len = _bt.length();
   m.position.copy(a).addScaledVector(_bt, 0.5);
   if (len > 1e-6) m.quaternion.setFromUnitVectors(UPY, _bt.multiplyScalar(1 / len));
-  m.scale.set(scaleXZ, Math.max(len, 1e-4), scaleXZ);
+  m.scale.set(scaleXZ, Math.max(len, 1e-4) / nominal, scaleXZ);
+}
+
+/** Closed shape through `pts` with every corner rounded by up to `r` (smooth, no self-intersection). */
+export function roundedShape(pts: [number, number][], r: number): Shape {
+  const sh = new Shape();
+  const n = pts.length;
+  const P = pts.map(([x, y]) => new Vector2(x, y));
+  for (let i = 0; i < n; i++) {
+    const prev = P[(i + n - 1) % n], cur = P[i], next = P[(i + 1) % n];
+    const d1 = cur.distanceTo(prev), d2 = cur.distanceTo(next);
+    const rr = Math.min(r, d1 * 0.45, d2 * 0.45);
+    const a = cur.clone().lerp(prev, rr / d1);
+    const b = cur.clone().lerp(next, rr / d2);
+    if (i === 0) sh.moveTo(a.x, a.y);
+    else sh.lineTo(a.x, a.y);
+    sh.quadraticCurveTo(cur.x, cur.y, b.x, b.y);
+  }
+  sh.closePath();
+  return sh;
+}
+
+/**
+ * Extrude a side-profile shape drawn in the bike's (z, y) plane across the bike (x), centred
+ * on x = 0, with rounded (bevelled) edges. UVs are projected from the side so liveries read
+ * correctly from both sides.
+ */
+export function sideExtrude(shape: Shape, width: number, bevel: number, curveSegments = 10): ExtrudeGeometry {
+  const depth = Math.max(0.001, width - 2 * bevel);
+  const g = new ExtrudeGeometry(shape, { depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel * 0.9, bevelSegments: 4, curveSegments });
+  // Shape x → bike z, extrusion → bike x.
+  g.rotateY(-Math.PI / 2);
+  g.translate(depth / 2, 0, 0);
+  g.computeBoundingBox();
+  const bb = g.boundingBox!;
+  const pos = g.getAttribute('position');
+  const uv = g.getAttribute('uv');
+  const zr = bb.max.z - bb.min.z || 1, yr = bb.max.y - bb.min.y || 1;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const u = (z - bb.min.z) / zr;
+    uv.setXY(i, x > 0 ? 1 - u : u, (y - bb.min.y) / yr);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Coil spring along Y, centred, unit length. */
+class Helix extends Curve<Vector3> {
+  constructor(private r: number, private turns: number) {
+    super();
+  }
+  getPoint(t: number, out = new Vector3()) {
+    const a = t * Math.PI * 2 * this.turns;
+    return out.set(Math.cos(a) * this.r, t - 0.5, Math.sin(a) * this.r);
+  }
 }
 
 function twoBoneIK(a: Vector3, c: Vector3, l1: number, l2: number, hint: Vector3, out: Vector3) {
@@ -134,7 +190,8 @@ export class BikeModel {
     const lights = byId(LIGHTS, build.parts.lights);
     const rimStyle = byId(RIM_STYLES, build.parts.rimStyle).id;
 
-    const paint = this.mat(new MeshStandardMaterial({ color: V.plasticColor, roughness: fin.roughness, metalness: fin.metalness }));
+    const gloss = 1 - Math.min(1, fin.roughness * 1.6);
+    const paint = this.mat(new MeshPhysicalMaterial({ color: V.plasticColor, roughness: fin.roughness, metalness: fin.metalness, clearcoat: gloss, clearcoatRoughness: 0.12 }));
     const frameM = this.mat(new MeshStandardMaterial({ color: V.frameColor, roughness: 0.45, metalness: 0.6 }));
     const accent = this.mat(new MeshStandardMaterial({ color: V.accentColor, roughness: 0.35, metalness: 0.3 }));
     const dark = this.mat(new MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.7, metalness: 0.3 }));
@@ -142,9 +199,9 @@ export class BikeModel {
     const gold = this.mat(new MeshStandardMaterial({ color: 0xd4a72c, roughness: 0.25, metalness: 0.9 }));
     const rimM = this.mat(new MeshStandardMaterial({ color: V.rimColor, roughness: 0.3, metalness: 0.7 }));
     const seatM = this.mat(new MeshStandardMaterial({ color: V.seatColor, roughness: 0.85 }));
-    const livery = this.mat(new MeshStandardMaterial({
+    const livery = this.mat(new MeshPhysicalMaterial({
       map: liveryTexture(V.plasticColor, V.decal, V.decalColor, V.accentColor, V.number),
-      roughness: fin.roughness, metalness: fin.metalness * 0.5,
+      roughness: fin.roughness, metalness: fin.metalness * 0.5, clearcoat: gloss, clearcoatRoughness: 0.12,
     }));
     const plateM = this.mat(new MeshStandardMaterial({ map: plateTexture(V.number, V.plateColor, '#111111'), roughness: 0.5 }));
 
@@ -155,7 +212,7 @@ export class BikeModel {
     const head = v(G.head), headTop = v(G.headTop);
     const tube = (pts: Vector3[], r: number, m: Material, x = 0) => {
       const curve = new CatmullRomCurve3(pts.map((p) => p.clone().setX(x)));
-      const mesh = new Mesh(this.geo(new TubeGeometry(curve, 24, r, 8)), m);
+      const mesh = new Mesh(this.geo(new TubeGeometry(curve, 32, r, 12)), m);
       mesh.castShadow = true;
       this.chassis.add(mesh);
       return mesh;
@@ -165,7 +222,7 @@ export class BikeModel {
       tube([headTop, P(0.12, 0.47), P(-0.12, 0.41), P(-0.32, 0.38), P(-0.62, 0.37)], 0.018, frameM, x);
       tube([head, P(0.3, 0.12), P(0.16, -0.1), P(-0.02, -0.08), P(-0.03, 0.08), P(-0.18, 0.2), P(-0.42, 0.33)], 0.02, frameM, x);
     }
-    const headTube = new Mesh(this.geo(new CylinderGeometry(0.03, 0.03, 0.22, 12)), frameM);
+    const headTube = new Mesh(this.geo(new CylinderGeometry(0.032, 0.032, 0.22, 20)), frameM);
     between(headTube, head, headTop);
     headTube.scale.set(1, headTube.scale.y, 1);
     headTube.geometry.translate(0, 0, 0);
@@ -180,12 +237,12 @@ export class BikeModel {
     battery.position.copy(v(G.battery));
     battery.castShadow = true;
     this.chassis.add(battery);
-    const motor = new Mesh(this.geo(new CylinderGeometry(G.motorRadius, G.motorRadius, 0.15, 20)), alloy);
+    const motor = new Mesh(this.geo(new CylinderGeometry(G.motorRadius, G.motorRadius, 0.15, 36)), alloy);
     motor.rotation.z = Math.PI / 2;
     motor.position.copy(v(G.motor));
     motor.castShadow = true;
     this.chassis.add(motor);
-    const motorCap = new Mesh(this.geo(new CylinderGeometry(G.motorRadius * 0.7, G.motorRadius * 0.7, 0.16, 16)), accent);
+    const motorCap = new Mesh(this.geo(new CylinderGeometry(G.motorRadius * 0.72, G.motorRadius * 0.78, 0.17, 32)), accent);
     motorCap.rotation.z = Math.PI / 2;
     motorCap.position.copy(motor.position);
     this.chassis.add(motorCap);
@@ -193,64 +250,72 @@ export class BikeModel {
     ctrl.position.set(0, 0.06, -0.12);
     this.chassis.add(ctrl);
 
-    // --- Body panels -------------------------------------------------------------
-    const panelW = Math.max(bs.x + 0.03, 0.2);
-    const panelMesh = (w: number, h: number, l: number, pos: Vector3, rotX = 0, m: Material = paint) => {
-      const mesh = new Mesh(this.geo(new BoxGeometry(w, h, l)), m);
-      mesh.position.copy(pos);
-      mesh.rotation.x = rotX;
+    // --- Body panels (sculpted, rounded) -------------------------------------------
+    const bp = v(G.battery);
+    const z0 = bp.z - bs.z / 2, z1 = bp.z + bs.z / 2, y0 = bp.y - bs.y / 2, y1 = bp.y + bs.y / 2;
+    const panelW = Math.max(bs.x + 0.05, 0.22);
+    const addMesh = (geo: BufferGeometry, m: Material | Material[], parent: Object3D = this.chassis) => {
+      const mesh = new Mesh(this.geo(geo), m);
       mesh.castShadow = true;
-      this.chassis.add(mesh);
+      mesh.receiveShadow = true;
+      parent.add(mesh);
       return mesh;
     };
-    if (kit.style !== 'race') {
-      // Side panels with livery on the outer faces.
-      const sideGeo = this.geo(new PlaneGeometry(0.5, 0.26));
-      for (const s of [1, -1]) {
-        const side = new Mesh(sideGeo, livery);
-        side.position.set(s * (panelW / 2 + 0.008), 0.23, 0.12);
-        side.rotation.y = s * (Math.PI / 2);
-        side.rotation.z = s * 0.06;
-        this.chassis.add(side);
-      }
-      panelMesh(panelW, 0.27, 0.5, new Vector3(0, 0.23, 0.12), 0.06);
-    } else {
-      for (const s of [1, -1]) {
-        const side = new Mesh(this.geo(new PlaneGeometry(0.34, 0.16)), livery);
-        side.position.set(s * (panelW / 2 + 0.008), 0.3, 0.1);
-        side.rotation.y = s * (Math.PI / 2);
-        this.chassis.add(side);
-      }
-    }
-    if (kit.style === 'armor') {
-      panelMesh(0.2, 0.03, 0.42, new Vector3(0, -0.16, 0.1), -0.1, alloy); // skid plate
-      for (const s of [1, -1]) panelMesh(0.02, 0.12, 0.3, new Vector3(s * 0.15, 0.0, 0.15), 0, dark);
-    }
-    // Top cover between head tube and seat, plus shroud "wings" flanking the head.
-    if (kit.style !== 'race') {
-      const topLen = Math.max(0.12, head.z - 0.03 - (G.seat.z + G.seatLength / 2) + 0.06);
-      panelMesh(0.17, 0.05, topLen, new Vector3(0, Math.min(G.seat.y, 0.46) + 0.0, G.seat.z + G.seatLength / 2 + topLen / 2 - 0.04), 0.12);
-      for (const sd of [1, -1]) {
-        const wing = panelMesh(0.02, 0.2, 0.22, new Vector3(sd * 0.115, 0.36, 0.25), 0.35, accent);
-        wing.rotation.y = sd * 0.25;
-      }
-    }
-    // Tail / rear fender blade
     const seatEnd = G.seat.z - G.seatLength / 2;
-    const rearFenderLen = fend.style === 'short' ? 0.32 : 0.55;
-    panelMesh(0.2, 0.025, rearFenderLen, new Vector3(0, G.seat.y - 0.04, seatEnd - rearFenderLen / 2 + 0.06), -0.18);
+    const seatFront = G.seat.z + G.seatLength / 2;
+    if (kit.style !== 'race') {
+      // One-piece side shroud wrapping the battery, rising toward the steering head.
+      const topF = Math.min(head.z - 0.02, z1 + 0.04);
+      const shroud = roundedShape([
+        [topF, Math.max(y1 + 0.12, head.y + 0.03)],
+        [z1 + 0.035, (y0 + y1) / 2 + 0.03],
+        [z1 - 0.03, y0 - 0.035],
+        [z0 + 0.05, y0 - 0.05],
+        [z0 - 0.03, y0 + 0.05],
+        [z0 - 0.04, y1 - 0.02],
+        [Math.max(seatFront - 0.06, z0 + 0.04), y1 + 0.03],
+        [(z1 + topF) / 2 - 0.04, y1 + 0.08],
+      ], 0.06);
+      addMesh(sideExtrude(shroud, panelW, 0.03, 12), livery);
+      if (kit.style === 'armor') {
+        addMesh(sideExtrude(roundedShape([[z1 + 0.04, y0 - 0.02], [z1 - 0.02, y0 - 0.11], [z0 + 0.02, y0 - 0.12], [z0 - 0.02, y0 - 0.04]], 0.04), panelW * 0.8, 0.015), alloy);
+      }
+    } else {
+      // Race kit: a slim tank-style cover; the battery case shows below.
+      const bat = addMesh(sideExtrude(roundedShape([[z1, y1], [z1, y0], [z0, y0], [z0, y1]], 0.04), bs.x, 0.02), dark);
+      bat.position.y = 0;
+      addMesh(sideExtrude(roundedShape([[head.z - 0.03, head.y + 0.02], [z1, y1 - 0.04], [z0 + 0.04, y1 - 0.02], [seatFront - 0.05, y1 + 0.06], [z1 - 0.06, y1 + 0.08]], 0.05), panelW * 0.85, 0.025), livery);
+    }
+    // Wings flanking the head tube.
+    if (kit.style !== 'race') {
+      for (const sd of [1, -1]) {
+        const wing = addMesh(sideExtrude(roundedShape([[0.04, 0.12], [0.1, -0.08], [-0.08, -0.1], [-0.12, 0.06]], 0.035), 0.022, 0.008), accent);
+        wing.position.set(sd * (panelW / 2 + 0.005), Math.max(y1 + 0.02, 0.38), Math.min(head.z - 0.08, z1));
+        wing.rotation.set(0.15, sd * 0.18, 0);
+      }
+    }
+    // Seat: long padded saddle.
+    const sy = G.seat.y;
+    const seatShape = roundedShape([
+      [seatFront + 0.02, sy + 0.005], [seatFront - 0.1, sy + 0.05], [seatEnd + 0.02, sy + 0.055], [seatEnd - 0.03, sy + 0.035],
+      [seatEnd, sy - 0.035], [seatFront - 0.05, sy - 0.04],
+    ], 0.05);
+    addMesh(sideExtrude(seatShape, 0.21, 0.04, 14), seatM);
+    // Tail / rear fender blade sweeping back from under the seat.
+    const rearFenderLen = fend.style === 'short' ? 0.3 : 0.52;
+    const tailShape = roundedShape([
+      [seatEnd + 0.12, sy - 0.03], [seatEnd - rearFenderLen, sy + 0.05], [seatEnd - rearFenderLen + 0.02, sy + 0.02],
+      [seatEnd - rearFenderLen * 0.4, sy - 0.06], [seatEnd + 0.12, sy - 0.1],
+    ], 0.035);
+    addMesh(sideExtrude(tailShape, 0.2, 0.015, 10), paint);
     // Tail light
-    const tail = new Mesh(this.geo(new BoxGeometry(0.08, 0.03, 0.02)), this.brakeLightMat);
-    tail.position.set(0, G.seat.y - 0.06, seatEnd - rearFenderLen + 0.15);
-    this.chassis.add(tail);
-    // Seat
-    const seat = new Mesh(this.geo(new BoxGeometry(0.22, 0.08, G.seatLength)), seatM);
-    seat.position.copy(v(G.seat));
-    seat.castShadow = true;
-    this.chassis.add(seat);
+    const tail = addMesh(new CapsuleGeometry(0.014, 0.07, 4, 8), this.brakeLightMat);
+    tail.rotation.z = Math.PI / 2;
+    tail.position.set(0, sy - 0.025, seatEnd - rearFenderLen * 0.72);
     // Footpegs
     for (const s of [1, -1]) {
-      const peg = new Mesh(this.geo(new BoxGeometry(0.1, 0.02, 0.05)), alloy);
+      const peg = new Mesh(this.geo(new CapsuleGeometry(0.014, 0.08, 3, 8)), alloy);
+      peg.rotation.z = Math.PI / 2;
       peg.position.set(s * (G.peg.x + 0.04), G.peg.y, G.peg.z);
       this.chassis.add(peg);
     }
@@ -275,13 +340,13 @@ export class BikeModel {
     const upperM = G.invertedFork ? gold : alloy;
     const lowerM = G.invertedFork ? alloy : dark;
     for (const s of [1, -1]) {
-      const up = new Mesh(this.geo(new CylinderGeometry(upperR, upperR, 1, 10)), upperM);
+      const up = new Mesh(this.geo(new CylinderGeometry(upperR, upperR, 1, 18)), upperM);
       const topP = headTop.clone().sub(head).add(new Vector3(s * 0.08, 0.02, 0));
       const botP = topP.clone().addScaledVector(this.steerAxis, -forkUpperLen - 0.22);
       between(up, topP, botP);
       up.castShadow = true;
       this.steerG.add(up);
-      const low = new Mesh(this.geo(new CylinderGeometry(lowerR, lowerR, 1, 10)), lowerM);
+      const low = new Mesh(this.geo(new CylinderGeometry(lowerR, lowerR, 1, 18)), lowerM);
       const a = axleRel.clone().add(new Vector3(s * 0.08, 0, 0));
       const b = a.clone().addScaledVector(this.steerAxis, spec.geo.forkLength * 0.55);
       between(low, a, b);
@@ -291,7 +356,7 @@ export class BikeModel {
     this.steerG.add(this.forkSlide);
     // Handlebar
     const barC = v(G.barCenter).sub(head);
-    const bar = new Mesh(this.geo(new CylinderGeometry(0.011, 0.011, G.barWidth, 8)), dark);
+    const bar = new Mesh(this.geo(new CylinderGeometry(0.011, 0.011, G.barWidth, 12)), dark);
     bar.rotation.z = Math.PI / 2;
     bar.position.copy(barC);
     this.steerG.add(bar);
@@ -299,7 +364,7 @@ export class BikeModel {
     between(riser, headTop.clone().sub(head), barC);
     this.steerG.add(riser);
     for (const s of [1, -1]) {
-      const grip = new Mesh(this.geo(new CylinderGeometry(0.017, 0.017, 0.12, 8)), seatM);
+      const grip = new Mesh(this.geo(new CapsuleGeometry(0.018, 0.1, 4, 12)), seatM);
       grip.rotation.z = Math.PI / 2;
       grip.position.copy(barC).add(new Vector3(s * (G.barWidth / 2 - 0.06), 0, 0));
       this.steerG.add(grip);
@@ -311,31 +376,35 @@ export class BikeModel {
     // Front plate / headlight / fairing
     const plateCenter = headTop.clone().sub(head).add(new Vector3(0, -0.12, 0.09));
     if (kit.style === 'fairing') {
-      const fair = new Mesh(this.geo(new BoxGeometry(0.34, 0.3, 0.05)), paint);
-      fair.position.copy(plateCenter).add(new Vector3(0, 0.04, 0.03));
-      fair.rotation.x = -0.35;
+      const fair = new Mesh(this.geo(sideExtrude(roundedShape([[0.08, 0.2], [0.02, -0.14], [-0.04, -0.12], [-0.02, 0.22]], 0.05), 0.34, 0.03, 12)), paint);
+      fair.position.copy(plateCenter).add(new Vector3(0, 0.02, 0.0));
+      fair.castShadow = true;
       this.steerG.add(fair);
-      const screen = new Mesh(this.geo(new PlaneGeometry(0.28, 0.16)), this.mat(new MeshStandardMaterial({ color: 0x223344, transparent: true, opacity: 0.45, side: DoubleSide })));
-      screen.position.copy(plateCenter).add(new Vector3(0, 0.22, 0.0));
-      screen.rotation.x = -0.6;
+      const screen = new Mesh(this.geo(new SphereGeometry(0.2, 20, 10, 0, Math.PI, 0, Math.PI * 0.32)), this.mat(new MeshPhysicalMaterial({ color: 0x334455, transparent: true, opacity: 0.4, roughness: 0.05, side: DoubleSide })));
+      screen.position.copy(plateCenter).add(new Vector3(0, 0.08, -0.08));
+      screen.rotation.set(-0.5, Math.PI / 2, 0);
+      screen.rotateY(-Math.PI / 2);
       this.steerG.add(screen);
     } else {
-      const plate = new Mesh(this.geo(new PlaneGeometry(0.24, 0.18)), plateM);
-      plate.position.copy(plateCenter);
+      // Rounded number plate with the plate graphic on its face.
+      const sh = roundedShape([[-0.125, 0.1], [-0.115, -0.095], [0.115, -0.095], [0.125, 0.1]], 0.04);
+      const pg = new ExtrudeGeometry(sh, { depth: 0.006, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 3, curveSegments: 8 });
+      const uv = pg.getAttribute('uv'), pp = pg.getAttribute('position');
+      for (let i = 0; i < pp.count; i++) uv.setXY(i, (pp.getX(i) + 0.125) / 0.25, (pp.getY(i) + 0.1) / 0.2);
+      const plate = new Mesh(this.geo(pg), plateM);
+      plate.position.copy(plateCenter).add(new Vector3(0, 0, -0.006));
       plate.rotation.x = -0.32;
+      plate.castShadow = true;
       this.steerG.add(plate);
-      const plateBack = new Mesh(this.geo(new BoxGeometry(0.25, 0.19, 0.015)), paint);
-      plateBack.position.copy(plateCenter).add(new Vector3(0, 0, -0.012));
-      plateBack.rotation.x = -0.32;
-      this.steerG.add(plateBack);
     }
     if (lights.style === 'round') {
-      const hl = new Mesh(this.geo(new CircleGeometry(0.045, 18)), this.headMat);
-      hl.position.copy(plateCenter).add(new Vector3(0, -0.125, 0.045));
-      hl.rotation.x = -0.32;
+      const hl = new Mesh(this.geo(new SphereGeometry(0.048, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2)), this.headMat);
+      hl.position.copy(plateCenter).add(new Vector3(0, -0.12, 0.03));
+      hl.rotation.x = Math.PI / 2 - 0.32;
       this.steerG.add(hl);
     } else if (lights.style === 'bar') {
-      const hl = new Mesh(this.geo(new BoxGeometry(0.22, 0.035, 0.02)), this.headMat);
+      const hl = new Mesh(this.geo(new CapsuleGeometry(0.018, 0.19, 4, 10)), this.headMat);
+      hl.rotation.z = Math.PI / 2;
       hl.position.copy(plateCenter).add(new Vector3(0, -0.11, 0.03));
       this.steerG.add(hl);
     }
@@ -345,19 +414,32 @@ export class BikeModel {
     // Front fender
     const fr = spec.front.radius;
     if (fend.style === 'high') {
-      const ff = new Mesh(this.geo(new BoxGeometry(0.13, 0.02, 0.5)), paint);
-      ff.position.copy(new Vector3(0, -0.04, 0.12));
-      ff.rotation.x = -0.12;
+      const ff = new Mesh(this.geo(sideExtrude(roundedShape([[0.4, 0.0], [0.38, -0.025], [-0.12, -0.03], [-0.13, 0.0], [0.1, 0.012]], 0.03), 0.14, 0.012)), paint);
+      ff.position.set(0, -0.03, 0);
+      ff.rotation.x = -0.1;
+      ff.castShadow = true;
       this.steerG.add(ff);
     } else {
-      const arc = Math.PI * (fend.style === 'short' ? 0.3 : 0.42);
-      const ffArc = new Mesh(this.geo(new TorusGeometry(fr + 0.035, 0.008, 6, 20, arc)), paint);
-      ffArc.scale.set(1, 1, 7);
-      const fg = new Group();
-      fg.add(ffArc);
-      ffArc.rotation.set(0, Math.PI / 2, Math.PI / 2 - arc * 0.35);
-      fg.position.copy(axleRel);
-      this.forkSlide.add(fg);
+      // Curved fender hugging the tyre (an annular arc, extruded across the wheel).
+      const arc = Math.PI * (fend.style === 'short' ? 0.32 : 0.46);
+      const r0 = fr + 0.03, r1 = fr + 0.045;
+      const start = Math.PI / 2 - arc * 0.3;
+      const sh = new Shape();
+      const N = 16;
+      for (let i = 0; i <= N; i++) {
+        const a = start + (arc * i) / N;
+        const p = [Math.cos(a) * r1, Math.sin(a) * r1];
+        if (i === 0) sh.moveTo(p[0], p[1]); else sh.lineTo(p[0], p[1]);
+      }
+      for (let i = N; i >= 0; i--) {
+        const a = start + (arc * i) / N;
+        sh.lineTo(Math.cos(a) * r0, Math.sin(a) * r0);
+      }
+      sh.closePath();
+      const ff = new Mesh(this.geo(sideExtrude(sh, 0.13, 0.006, 4)), paint);
+      ff.castShadow = true;
+      ff.position.copy(axleRel);
+      this.forkSlide.add(ff);
     }
 
     // --- Wheels -------------------------------------------------------------------
@@ -367,7 +449,7 @@ export class BikeModel {
       const tireTex = treadTexture(tread);
       tireTex.repeat.set(1, 6);
       const tireM = this.mat(new MeshStandardMaterial({ color: 0x18191b, roughness: 0.92, bumpMap: tireTex, bumpScale: 2 }));
-      const tire = new Mesh(this.geo(new TorusGeometry(radius - rc, rc, 12, 40)), tireM);
+      const tire = new Mesh(this.geo(new TorusGeometry(radius - rc, rc, 16, 64)), tireM);
       tire.rotation.y = Math.PI / 2;
       tire.scale.set(1, 1, Math.min(1.3, width / (2 * rc)));
       tire.castShadow = true;
@@ -392,29 +474,34 @@ export class BikeModel {
         im.castShadow = true;
         g.add(im);
       }
-      const rim = new Mesh(this.geo(new TorusGeometry(rimR, 0.014, 6, 32)), rimM);
+      const rim = new Mesh(this.geo(new TorusGeometry(rimR, 0.015, 10, 56)), rimM);
       rim.rotation.y = Math.PI / 2;
       g.add(rim);
-      const hub = new Mesh(this.geo(new CylinderGeometry(0.045, 0.045, width * 0.9 + 0.05, 12)), alloy);
+      const hub = new Mesh(this.geo(new CylinderGeometry(0.045, 0.045, width * 0.9 + 0.05, 20)), alloy);
       hub.rotation.z = Math.PI / 2;
       g.add(hub);
       if (rimStyle === 'disc') {
-        const disc = new Mesh(this.geo(new CylinderGeometry(rimR, rimR, 0.03, 32)), rimM);
+        const disc = new Mesh(this.geo(new CylinderGeometry(rimR, rimR, 0.03, 48)), rimM);
         disc.rotation.z = Math.PI / 2;
         g.add(disc);
       } else {
         const n = rimStyle === 'spoke' ? 18 : rimStyle === 'cast' ? 6 : 5;
         const r = rimStyle === 'spoke' ? 0.0025 : 0.012;
-        const sg = this.geo(new CylinderGeometry(r, r * (rimStyle === 'spoke' ? 1 : 1.6), rimR - 0.04, 6));
+        // All spokes merged into one mesh (one draw call per wheel).
+        const list: BufferGeometry[] = [];
+        const m4 = new Matrix4();
         for (let i = 0; i < n; i++) {
-          const s = new Mesh(sg, rimStyle === 'spoke' ? alloy : rimM);
+          const sg = new CylinderGeometry(r, r * (rimStyle === 'spoke' ? 1 : 1.6), rimR - 0.04, 6);
           const a = (i / n) * Math.PI * 2;
-          s.position.set(rimStyle === 'spoke' ? (i % 2 ? 0.015 : -0.015) : 0, Math.cos(a) * (rimR / 2 + 0.02), Math.sin(a) * (rimR / 2 + 0.02));
-          s.rotation.x = a;
-          g.add(s);
+          m4.makeRotationX(a).setPosition(rimStyle === 'spoke' ? (i % 2 ? 0.015 : -0.015) : 0, Math.cos(a) * (rimR / 2 + 0.02), Math.sin(a) * (rimR / 2 + 0.02));
+          sg.applyMatrix4(m4);
+          list.push(sg);
         }
+        const merged = this.geo(mergeGeometries(list, false)!);
+        list.forEach((x) => x.dispose());
+        g.add(new Mesh(merged, rimStyle === 'spoke' ? alloy : rimM));
       }
-      const disc = new Mesh(this.geo(new CylinderGeometry(rotor / 2, rotor / 2, 0.005, 24)), alloy);
+      const disc = new Mesh(this.geo(new CylinderGeometry(rotor / 2, rotor / 2, 0.005, 40)), alloy);
       disc.rotation.z = Math.PI / 2;
       disc.position.x = -0.06;
       g.add(disc);
@@ -424,7 +511,7 @@ export class BikeModel {
     this.frontWheel.add(fw);
     this.frontWheel.position.copy(axleRel);
     this.forkSlide.add(this.frontWheel);
-    const caliperF = new Mesh(this.geo(new BoxGeometry(0.04, 0.07, 0.05)), accent);
+    const caliperF = new Mesh(this.geo(new CapsuleGeometry(0.022, 0.04, 4, 10)), accent);
     caliperF.position.copy(axleRel).add(new Vector3(-0.07, 0.07, -0.06));
     this.forkSlide.add(caliperF);
 
@@ -435,7 +522,7 @@ export class BikeModel {
     this.chassis.add(this.rearWheel);
     // Rear sprocket on the wheel (size follows the tooth count)
     this.rearSprocketR = build.tuning.rearSprocket * 0.0021;
-    const rs = new Mesh(this.geo(new CylinderGeometry(this.rearSprocketR, this.rearSprocketR, 0.006, 32)), alloy);
+    const rs = new Mesh(this.geo(new CylinderGeometry(this.rearSprocketR, this.rearSprocketR, 0.006, 48)), alloy);
     rs.rotation.z = Math.PI / 2;
     rs.position.x = 0.07;
     rw.add(rs);
@@ -444,15 +531,15 @@ export class BikeModel {
     this.chassis.add(this.swingarm);
     this.swingarm.add(this.armScale);
     for (const s of [1, -1]) {
-      const arm = new Mesh(this.geo(new BoxGeometry(0.03, 0.06, 1)), frameM);
-      arm.position.set(s * 0.085, 0, -0.5);
+      const arm = new Mesh(this.geo(sideExtrude(roundedShape([[0.04, 0.036], [0.04, -0.036], [-1.02, -0.024], [-1.02, 0.024]], 0.02), 0.034, 0.008, 6)), frameM);
+      arm.position.set(s * 0.085, 0, 0);
       arm.castShadow = true;
       this.armScale.add(arm);
     }
     // Front sprocket / chain
     this.frontSprocketR = build.tuning.frontSprocket * 0.0021;
     this.frontSprocketPos.set(0.07, -0.02, 0.05);
-    const fs = new Mesh(this.geo(new CylinderGeometry(this.frontSprocketR, this.frontSprocketR, 0.008, 16)), dark);
+    const fs = new Mesh(this.geo(new CylinderGeometry(this.frontSprocketR, this.frontSprocketR, 0.008, 24)), dark);
     fs.rotation.z = Math.PI / 2;
     fs.position.copy(this.frontSprocketPos);
     this.chassis.add(fs);
@@ -462,14 +549,48 @@ export class BikeModel {
     this.chassis.add(this.chainTop, this.chainBot);
     // Shock
     this.shockTop.copy(v(G.shockTop));
-    this.shock = new Mesh(this.geo(new CylinderGeometry(0.02, 0.02, 1, 10)), alloy);
-    this.spring = new Mesh(this.geo(new CylinderGeometry(0.034, 0.034, 1, 12, 1, true)), this.mat(new MeshStandardMaterial({ color: V.accentColor, roughness: 0.4, metalness: 0.4, wireframe: true })));
+    this.shock = new Mesh(this.geo(new CylinderGeometry(0.02, 0.02, 1, 16)), alloy);
+    this.spring = new Mesh(this.geo(new TubeGeometry(new Helix(0.032, 9), 180, 0.0055, 6)), this.mat(new MeshStandardMaterial({ color: V.accentColor, roughness: 0.35, metalness: 0.5 })));
     this.chassis.add(this.shock, this.spring);
 
+    // Fewer draw calls: merge the static meshes of each rigid group by material.
+    for (const grp of [this.chassis, this.steerG, this.forkSlide, fw, rw]) this.mergeStatic(grp, [this.shock, this.spring, this.chainTop, this.chainBot]);
     this.root.traverse((o) => {
       if ((o as Mesh).isMesh) o.castShadow = true;
     });
     this.update({ steer: 0, frontComp: spec.front.travel * 0.3, rearComp: spec.rear.travel * 0.3, frontAngle: 0, rearAngle: 0, riderShift: 0, riderLat: 0, speed: 0, brake: 0, crashed: false, headlight: true });
+  }
+
+  /** Merge a group's direct, non-instanced Mesh children that share a material into one mesh. */
+  private mergeStatic(group: Object3D, exclude: Object3D[]) {
+    const byMat = new Map<Material, Mesh[]>();
+    for (const c of group.children) {
+      const m = c as Mesh;
+      if (!m.isMesh || (m as unknown as InstancedMesh).isInstancedMesh || exclude.includes(m) || Array.isArray(m.material)) continue;
+      const mat = m.material as Material;
+      let l = byMat.get(mat);
+      if (!l) byMat.set(mat, (l = []));
+      l.push(m);
+    }
+    for (const [mat, list] of byMat) {
+      if (list.length < 2) continue;
+      const geos = list.map((m) => {
+        m.updateMatrix();
+        let g = m.geometry.clone().applyMatrix4(m.matrix);
+        if (g.index) g = g.toNonIndexed();
+        for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
+        if (!g.getAttribute('uv')) g.setAttribute('uv', new Float32BufferAttribute(new Float32Array(g.getAttribute('position').count * 2), 2));
+        g.clearGroups();
+        return g;
+      });
+      const merged = mergeGeometries(geos, false);
+      geos.forEach((g) => g.dispose());
+      if (!merged) continue;
+      for (const m of list) group.remove(m);
+      const mm = new Mesh(this.geo(merged), mat);
+      mm.castShadow = mm.receiveShadow = true;
+      group.add(mm);
+    }
   }
 
   update(s: BikeVisualState) {
@@ -518,12 +639,16 @@ export class BikeModel {
   }
 }
 
-/** Low-poly rider with procedural IK pose. Lives in the scene separately so it can detach on crashes. */
+/** Nominal limb lengths (m); capsules are built at these lengths and stretched slightly by IK. */
+const LIMB = { uarm: 0.3, farm: 0.3, thigh: 0.44, shin: 0.46, torso: 0.5 };
+
+/** Rider with smooth capsule limbs and an MX helmet, posed by IK. Lives in the scene separately so it can detach on crashes. */
 export class RiderModel {
   root = new Group();
-  private parts: Record<string, Mesh> = {};
+  private parts: Record<string, Object3D> = {};
+  private helmet = new Group();
   private disposables: (BufferGeometry | Material)[] = [];
-  private tmp = { hip: new Vector3(), neck: new Vector3(), head: new Vector3(), sh: [new Vector3(), new Vector3()], el: [new Vector3(), new Vector3()], kn: [new Vector3(), new Vector3()], hipS: [new Vector3(), new Vector3()] };
+  private tmp = { hip: new Vector3(), neck: new Vector3(), head: new Vector3(), sh: [new Vector3(), new Vector3()], el: [new Vector3(), new Vector3()], kn: [new Vector3(), new Vector3()], hipS: [new Vector3(), new Vector3()], v: new Vector3(), w: new Vector3() };
 
   constructor(build: BikeBuild) {
     this.rebuild(build);
@@ -531,44 +656,74 @@ export class RiderModel {
 
   rebuild(build: BikeBuild) {
     this.dispose();
-    const suit = new MeshStandardMaterial({ color: new Color(build.visual.accentColor).lerp(new Color(0x1b1d22), 0.55), roughness: 0.8 });
-    const suit2 = new MeshStandardMaterial({ color: 0x24272e, roughness: 0.85 });
-    const helmet = new MeshStandardMaterial({ color: build.visual.plasticColor, roughness: 0.25, metalness: 0.2 });
-    const visor = new MeshStandardMaterial({ color: 0x111418, roughness: 0.1, metalness: 0.6 });
-    const boot = new MeshStandardMaterial({ color: 0x15171a, roughness: 0.7 });
-    this.disposables.push(suit, suit2, helmet, visor, boot);
-    const cyl = (r1: number, r2: number) => {
-      const g = new CylinderGeometry(r1, r2, 1, 8);
-      this.disposables.push(g);
-      return g;
-    };
-    const add = (name: string, geo: BufferGeometry, m: Material) => {
+    const accent = new Color(build.visual.accentColor);
+    const jersey = new MeshStandardMaterial({ color: accent.clone().lerp(new Color(0x1b1d22), 0.35), roughness: 0.75 });
+    const pants = new MeshStandardMaterial({ color: 0x23262d, roughness: 0.8 });
+    const shell = new MeshPhysicalMaterial({ color: build.visual.plasticColor, roughness: 0.3, metalness: 0.1, clearcoat: 1, clearcoatRoughness: 0.08 });
+    const trim = new MeshStandardMaterial({ color: build.visual.accentColor, roughness: 0.4 });
+    const lens = new MeshPhysicalMaterial({ color: 0x0c1016, roughness: 0.05, metalness: 0.9, clearcoat: 1 });
+    const black = new MeshStandardMaterial({ color: 0x141619, roughness: 0.6 });
+    const boot = new MeshStandardMaterial({ color: 0xe9ebee, roughness: 0.5 });
+    this.disposables.push(jersey, pants, shell, trim, lens, black, boot);
+    const G = <T extends BufferGeometry>(g: T) => (this.disposables.push(g), g);
+    const add = (name: string, geo: BufferGeometry, m: Material, parent: Object3D = this.root) => {
       const mesh = new Mesh(geo, m);
       mesh.castShadow = true;
       this.parts[name] = mesh;
-      this.root.add(mesh);
+      parent.add(mesh);
+      return mesh;
     };
-    add('torso', cyl(0.16, 0.13), suit);
-    add('pelvis', cyl(0.13, 0.13), suit2);
+    // Capsule of total length L (caps included) along Y, centred.
+    const cap = (r: number, L: number) => G(new CapsuleGeometry(r, Math.max(0.01, L - 2 * r), 6, 14));
+    const torso = add('torso', cap(0.15, LIMB.torso), jersey);
+    torso.scale.set(1.12, 1, 0.82);
+    add('pelvis', cap(0.13, 0.36), pants);
     for (const s of ['L', 'R']) {
-      add('uarm' + s, cyl(0.045, 0.04), suit);
-      add('farm' + s, cyl(0.04, 0.035), suit);
-      add('thigh' + s, cyl(0.065, 0.055), suit2);
-      add('shin' + s, cyl(0.055, 0.05), boot);
+      add('uarm' + s, cap(0.05, LIMB.uarm), jersey);
+      add('farm' + s, cap(0.044, LIMB.farm), jersey);
+      add('glove' + s, G(new SphereGeometry(0.048, 14, 10)), black);
+      add('thigh' + s, cap(0.072, LIMB.thigh), pants);
+      add('shin' + s, cap(0.064, LIMB.shin), boot);
+      add('foot' + s, cap(0.052, 0.26), boot);
     }
-    const hg = new SphereGeometry(0.135, 14, 10);
-    this.disposables.push(hg);
-    add('helmet', hg, helmet);
-    const vg = new BoxGeometry(0.17, 0.07, 0.06);
-    this.disposables.push(vg);
-    add('visor', vg, visor);
+    // Helmet: shell, chin bar, peak, goggles + strap.
+    add('shell', G(new SphereGeometry(0.14, 28, 20)), shell, this.helmet).scale.set(1, 1.04, 1.12);
+    const chin = add('chin', G(new TorusGeometry(0.105, 0.035, 10, 24, Math.PI * 0.9)), shell, this.helmet);
+    chin.rotation.set(Math.PI / 2 + 0.35, 0, Math.PI * 0.05);
+    chin.position.set(0, -0.07, 0.03);
+    const peak = add('peak', G(sideExtrude(roundedShape([[0.26, 0.05], [0.24, 0.02], [0.04, 0.0], [0.05, 0.05]], 0.02), 0.2, 0.01)), trim, this.helmet);
+    peak.position.set(0, 0.035, -0.02);
+    peak.rotation.x = -0.18;
+    const gog = add('goggles', G(new CapsuleGeometry(0.035, 0.12, 4, 12)), lens, this.helmet);
+    gog.rotation.z = Math.PI / 2;
+    gog.position.set(0, 0.0, 0.135);
+    const stripe = add('stripe', G(new TorusGeometry(0.143, 0.022, 6, 32, Math.PI * 1.1)), trim, this.helmet);
+    stripe.rotation.set(0, Math.PI / 2, -Math.PI * 0.05);
+    stripe.scale.set(1.12, 1.04, 1);
+    const strap = add('strap', G(new TorusGeometry(0.145, 0.012, 6, 32)), black, this.helmet);
+    strap.scale.set(1, 1, 1.1);
+    this.root.add(this.helmet);
   }
 
   dispose() {
     for (const d of this.disposables) d.dispose();
     this.disposables = [];
     this.root.clear();
+    this.helmet = new Group();
     this.parts = {};
+  }
+
+  private limb(name: string, a: Vector3, b: Vector3, nominal: number) {
+    between(this.parts[name], a, b, 1, nominal);
+    // Keep the radial scale of pre-scaled parts (torso).
+    if (name === 'torso') this.parts[name].scale.set(1.12, this.parts[name].scale.y, 0.82);
+  }
+
+  /** Place a boot along the foot direction (toes forward along +z of the bike). */
+  private foot(name: string, ankle: Vector3) {
+    const f = this.parts[name];
+    f.position.copy(ankle).add(this.tmp.w.set(0, -0.02, 0.07));
+    f.rotation.set(Math.PI / 2, 0, 0);
   }
 
   /**
@@ -584,29 +739,29 @@ export class RiderModel {
     const pitch = 0.45 + crouch * 0.25 + shift * 0.35;
     const roll = lat * 0.25;
     t.neck.set(Math.sin(roll) * 0.5 + t.hip.x, t.hip.y + Math.cos(pitch) * 0.5, t.hip.z + Math.sin(pitch) * 0.5);
-    t.head.copy(t.neck).add(new Vector3(0, 0.16, 0.06));
+    t.head.copy(t.neck).add(t.v.set(0, 0.15, 0.07));
     const P = this.parts;
-    between(P.torso, t.hip, t.neck);
+    this.limb('torso', t.hip, t.neck, LIMB.torso);
     P.pelvis.position.copy(t.hip);
-    P.pelvis.scale.set(1, 0.14, 1);
     P.pelvis.rotation.set(0, 0, Math.PI / 2);
-    P.helmet.position.copy(t.head);
-    P.visor.position.copy(t.head).add(new Vector3(0, -0.01, 0.11));
-    P.visor.rotation.set(-pitch * 0.3, 0, 0);
-    // Arms
+    this.helmet.position.copy(t.head);
+    // Eyes up the trail: the head pitches back against the torso lean.
+    this.helmet.rotation.set(-(pitch - 0.5) * 0.4, 0, roll * 0.5);
     const grips = [gripL, gripR];
     for (let i = 0; i < 2; i++) {
       const s = i === 0 ? 1 : -1;
-      t.sh[i].copy(t.neck).add(new Vector3(s * 0.19, -0.06, -0.02));
-      twoBoneIK(t.sh[i], grips[i], 0.3, 0.3, new Vector3(s * 0.8, -0.5, -0.4), t.el[i]);
-      between(P[i === 0 ? 'uarmL' : 'uarmR'], t.sh[i], t.el[i]);
-      between(P[i === 0 ? 'farmL' : 'farmR'], t.el[i], grips[i]);
-      // Legs
-      t.hipS[i].copy(t.hip).add(new Vector3(s * 0.11, 0, 0));
-      const peg = new Vector3(s * (G.peg.x + 0.05), G.peg.y + 0.07, G.peg.z - 0.02);
-      twoBoneIK(t.hipS[i], peg, 0.44, 0.46, new Vector3(s * 0.25, 0.3, 1), t.kn[i]);
-      between(P[i === 0 ? 'thighL' : 'thighR'], t.hipS[i], t.kn[i]);
-      between(P[i === 0 ? 'shinL' : 'shinR'], t.kn[i], peg);
+      const S = i === 0 ? 'L' : 'R';
+      t.sh[i].copy(t.neck).add(t.v.set(s * 0.19, -0.07, -0.02));
+      twoBoneIK(t.sh[i], grips[i], LIMB.uarm, LIMB.farm, t.w.set(s * 0.8, -0.5, -0.4), t.el[i]);
+      this.limb('uarm' + S, t.sh[i], t.el[i], LIMB.uarm);
+      this.limb('farm' + S, t.el[i], grips[i], LIMB.farm);
+      P['glove' + S].position.copy(grips[i]);
+      t.hipS[i].copy(t.hip).add(t.v.set(s * 0.11, 0, 0));
+      const peg = t.v.set(s * (G.peg.x + 0.05), G.peg.y + 0.08, G.peg.z - 0.02).clone();
+      twoBoneIK(t.hipS[i], peg, LIMB.thigh, LIMB.shin, t.w.set(s * 0.25, 0.3, 1), t.kn[i]);
+      this.limb('thigh' + S, t.hipS[i], t.kn[i], LIMB.thigh);
+      this.limb('shin' + S, t.kn[i], peg, LIMB.shin);
+      this.foot('foot' + S, peg);
     }
     this.root.matrixAutoUpdate = false;
     this.root.matrix.copy(chassisWorld);
@@ -619,18 +774,21 @@ export class RiderModel {
     const t = this.tmp;
     t.hip.set(0, -0.1, 0);
     t.neck.set(0, 0.35, 0.1);
-    between(P.torso, t.hip, t.neck);
+    this.limb('torso', t.hip, t.neck, LIMB.torso);
     P.pelvis.position.copy(t.hip);
-    P.helmet.position.set(0, 0.52, 0.16);
-    P.visor.position.set(0, 0.5, 0.28);
+    this.helmet.position.set(0, 0.52, 0.16);
+    this.helmet.rotation.set(0.3, 0, 0);
     for (let i = 0; i < 2; i++) {
       const s = i === 0 ? 1 : -1;
+      const S = i === 0 ? 'L' : 'R';
       const sh = new Vector3(s * 0.19, 0.3, 0.08), el = new Vector3(s * 0.3, 0.1, 0.25), hd = new Vector3(s * 0.2, 0.25, 0.4);
-      between(P[i === 0 ? 'uarmL' : 'uarmR'], sh, el);
-      between(P[i === 0 ? 'farmL' : 'farmR'], el, hd);
+      this.limb('uarm' + S, sh, el, LIMB.uarm);
+      this.limb('farm' + S, el, hd, LIMB.farm);
+      P['glove' + S].position.copy(hd);
       const hp = new Vector3(s * 0.11, -0.1, 0), kn = new Vector3(s * 0.15, 0.15, 0.4), ft = new Vector3(s * 0.15, -0.25, 0.5);
-      between(P[i === 0 ? 'thighL' : 'thighR'], hp, kn);
-      between(P[i === 0 ? 'shinL' : 'shinR'], kn, ft);
+      this.limb('thigh' + S, hp, kn, LIMB.thigh);
+      this.limb('shin' + S, kn, ft, LIMB.shin);
+      this.foot('foot' + S, ft);
     }
     _q.copy(rot);
     this.root.matrixAutoUpdate = false;

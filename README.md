@@ -1,11 +1,15 @@
-# Voltline — Electric Dirt Bike Sandbox
+# Stark Varg EBike — Electric Dirt Bike Sandbox
 
-An original 3D browser game about building, tuning and riding lightweight **electric** dirt bikes (Surron-style e-motos).
+A 3D browser game about building, tuning and riding lightweight **electric** dirt bikes.
+
+> Naming note: the game is branded "Stark Varg EBike" at the owner's request. Stark Varg is a real product of
+> Stark Future; this is an unofficial fan project and is not affiliated with or endorsed by them. Check trademark use
+> before distributing it publicly. Models, textures and sounds are still all procedurally generated in-house.
 Build a bike in the garage, take it to the city streets, the MX track or the test facilities, and feel what every change does
 to acceleration, grip, suspension, wheelies and drifts. No accounts, no servers, and it plays offline once installed.
 
-Electric only: no cars, no combustion engines, no gear shifting. All names, models, textures and sounds are original and
-procedurally generated, so there are no downloaded asset packs.
+Electric only: no cars, no combustion engines, no gear shifting. All models, textures and sounds are procedurally
+generated, so there are no downloaded asset packs.
 
 ## Run it
 
@@ -33,6 +37,8 @@ The service worker is only registered in production builds (`npm run build && np
 | **A D** / ← → | Steer. The rider leans and countersteers for you |
 | **Q** / Shift | Lean back: wheelie, pull up in the air |
 | **E** | Lean forward: keep the front down, stoppie, push down in the air |
+| **Z** | **Wheelie button** (hold). Pops and holds a wheelie; hold it too long (about 3 s) and you loop out and fall off the back |
+| **X** | **Stoppie button** (hold). Weight forward plus front brake; too long at speed sends you over the bars |
 | **R** | Reset to the last safe spot |
 | **C** | Camera: chase / far / helmet |
 | **M** | Ride mode: Eco / Standard / Sport |
@@ -42,18 +48,28 @@ The service worker is only registered in production builds (`npm run build && np
 | **Esc** / P | Pause (teleport, challenges, settings) |
 | Mouse drag / wheel | Look around / zoom |
 
-**Gamepad:** RT throttle, LT front brake, RB/B rear brake, left stick steer, right stick lean (LB = lean back), Y reset, Start pause, X ride mode.
+**Gamepad:** RT throttle, LT front brake, RB/B rear brake, left stick steer, right stick lean (LB = lean back), A wheelie, L3 stoppie, Y reset, Start pause, X ride mode.
 
 ### Touch (phones/tablets, landscape)
 
-* **Left stick**: steer (left/right) and lean (up = forward, down = back).
+* **Left stick** (floating: it centres wherever your thumb lands on the left half): steer (left/right) and lean (up = forward, down = back).
 * **Throttle pad** (tall, right): slide your thumb up for more throttle.
-* **FRONT / REAR** brake buttons.
+* **FRONT / REAR** brake buttons. Your thumb can slide between throttle and brakes without lifting.
+* **WHEELIE / STOPPIE** buttons above the brakes. The wheelie button fills red the longer you hold it; let go before it is full or you fall off the back.
 * Top-right: pause ❚❚, reset ⟲, camera ◉, ride mode M.
 * Drag the empty upper-right area to look around.
 * All controls are multitouch, so you can throttle, steer and brake at the same time. There's a left-handed layout in Settings.
 
 ## What's in the game
+
+* **Graphics**:
+  * Smooth, sculpted bike bodywork with clear-coat paint and reflections from a sky environment map.
+  * Rider with capsule limbs, gloves, boots and an MX helmet with peak, goggles and chin bar.
+  * Articulated pedestrians with individual height, build, skin tone, hair and outfits, faces, and a walk cycle with knees and elbows.
+  * A city of distinct buildings: brick, glass offices with setback towers, apartments with balconies, stucco houses. They have shopfronts, awnings, cornices, rooftop units, water tanks and street trees.
+  * Volumetric-looking clouds, distant mountain ranges, terrain shading that blends asphalt, concrete slabs, dirt and grass.
+  * Wind-swayed grass, organic trees, track flags and tyre stacks, EV chargers and planters at the hub.
+  * Mobile-friendly: vegetation is chunked and distance-culled, static bike parts are merged, and adaptive resolution keeps the frame rate up.
 
 * **Motorcycle physics**: a 6-DOF rigid body with two suspended wheels.
   * Torus tire contact that rides over curbs and ramp lips.
@@ -128,7 +144,7 @@ npm run deploy        # = npm run build && npx wrangler pages deploy dist --proj
 1. Open the deployed HTTPS URL in **Safari** on the iPhone.
 2. Wait until the menu appears, then give it about 5 more seconds while the service worker caches everything.
 3. Tap **Share** (□↑), then **Add to Home Screen**, then **Add**.
-4. Launch **Voltline** from the Home Screen icon. It opens full-screen without Safari's toolbars. Rotate to landscape.
+4. Launch **Stark Varg EBike** from the Home Screen icon. It opens full-screen without Safari's toolbars. Rotate to landscape.
 
 ## Verifying offline play
 
@@ -153,12 +169,13 @@ npm run deploy        # = npm run build && npx wrangler pages deploy dist --proj
 
 ## Tests
 
-* `npm test`: 41 Vitest tests.
+* `npm test`: 44 Vitest tests.
   * Physics scenarios:
     * settling and sag; acceleration and top speed; braking for every preset without flipping
     * turn equilibrium vs. tanφ = v²/(gR); right-steer → right-lean; low-speed U-turn; slaloms at 3 speeds
     * held wheelies; sustained dirt power slides; traction control suppressing slides
     * kicker jump landing; curb climbing; 40 s random-input fuzz (no NaN); crash/reset recovery
+    * trick buttons: a short wheelie hold lifts the front safely, holding too long loops out, the stoppie button lifts the rear
   * Customization effects:
     * gearing; rear wheel size; knobby vs. street tires
     * battery mass and inertia; spring rate and preload
@@ -174,6 +191,7 @@ npm run deploy        # = npm run build && npx wrangler pages deploy dist --proj
   * a full drag-strip challenge run that records a measured result
   * the service worker caches assets, and an **offline reload** still boots and rides with settings intact
   * the manifest and icons resolve
-  * mobile multitouch: throttle and steer at once, brakes, buttons
+  * mobile multitouch: throttle and steer at once, brakes, the wheelie button lifting the front, buttons
+  * riding tests switch to the Low preset and wait on game time, because software-rendered CI is very slow
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the architecture, trade-offs, known limitations and the continuation checklist.

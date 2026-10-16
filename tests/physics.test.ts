@@ -294,3 +294,36 @@ describe('customization changes measurable behaviour', () => {
     expect(eco.t0to50 ?? 99).toBeGreaterThan(sport.t0to50!);
   });
 });
+
+describe('trick buttons', () => {
+  const rolling = (v: number) => {
+    const bike = makeBike(computeVehicleSpec(defaultBuild()), flatWorld(3000, 'asphalt'));
+    settle(bike);
+    run(bike, 20, (_t, b) => ({ ...emptyInput(), throttle: Math.max(0, Math.min(1, (v + 0.5 - b.speed) * 0.5)) }), (_t, b) => b.speed >= v);
+    return bike;
+  };
+  it('a short wheelie-button hold lifts the front without crashing; releasing brings it down', () => {
+    const bike = rolling(5.5);
+    let maxP = 0;
+    run(bike, 1.8, () => ({ ...emptyInput(), wheelie: 1 }), (_t, b) => { maxP = Math.max(maxP, b.pitch); });
+    expect(maxP).toBeGreaterThan(0.3);
+    expect(bike.crashed).toBe(false);
+    run(bike, 3, () => emptyInput());
+    expect(bike.crashed).toBe(false);
+    expect(bike.front.grounded).toBe(true);
+  });
+  it('holding the wheelie button too long loops out: the rider falls off the back', () => {
+    const bike = rolling(5.5);
+    run(bike, 5, () => ({ ...emptyInput(), wheelie: 1 }));
+    expect(bike.crashed).toBe(true);
+    expect(bike.crashCause).toBe('looped out');
+  });
+  it('the stoppie button lifts the rear while braking', () => {
+    const bike = rolling(11.5);
+    let minP = 0;
+    run(bike, 1, () => ({ ...emptyInput(), stoppie: 1 }), (_t, b) => { minP = Math.min(minP, b.pitch); });
+    expect(minP).toBeLessThan(-0.12);
+    expect(bike.crashed).toBe(false);
+    expect(bike.speed).toBeLessThan(11);
+  });
+});

@@ -33,20 +33,28 @@ export class UI {
     this.toasts = h('div', { class: 'toasts', role: 'status', 'aria-live': 'polite' });
     this.hud = new Hud(game, this.layer);
     this.garage = new Garage(game, this.layer);
-    const rotate = h('div', { class: 'rotate-hint' }, h('div', { class: 'icon' }, '📱'), h('b', {}, 'Rotate your phone'), h('span', { class: 'note' }, 'Voltline plays best in landscape.'));
+    const rotate = h('div', { class: 'rotate-hint' }, h('div', { class: 'icon' }, '📱'), h('b', {}, 'Rotate your phone'), h('span', { class: 'note' }, 'Stark Varg EBike plays best in landscape.'));
     this.layer.append(this.screen, this.toasts, rotate);
     root.append(this.layer);
     // Prevent iOS double-tap zoom / gesture zoom while playing.
-    document.addEventListener('gesturestart', (e) => e.preventDefault());
+    for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
     document.addEventListener('dblclick', (e) => e.preventDefault());
-    // Unlock audio on the first interaction.
+    // Pinch-zoom outside scrollable panels (iOS ignores user-scalable=no).
+    document.addEventListener('touchmove', (e) => {
+      if (e.touches.length > 1 && !(e.target as HTMLElement).closest?.('.garage-pinch')) e.preventDefault();
+    }, { passive: false });
+    // Unlock audio on interaction. iOS only grants audio from touchend/click, not touchstart,
+    // and can leave the context "interrupted" after calls or app switches, so keep listening.
     const unlock = () => {
       void game.audio.unlock();
     };
-    window.addEventListener('pointerdown', unlock, { once: false });
-    window.addEventListener('keydown', unlock, { once: false });
-    // Already-satisfied unlocks should not re-announce.
-    for (const k of this.unlockKeys()) if (game.isUnlocked(k.key)) this.announced.add(k.key);
+    for (const ev of ['pointerdown', 'touchend', 'click', 'keydown']) window.addEventListener(ev, unlock, { passive: true });
+    this.seedAnnounced();
+  }
+
+  /** Unlocks already satisfied by saved progress should not be announced again. */
+  seedAnnounced() {
+    for (const k of this.unlockKeys()) if (this.game.isUnlocked(k.key)) this.announced.add(k.key);
   }
 
   onState(s: GameState, _prev: GameState) {
@@ -66,11 +74,13 @@ export class UI {
   }
 
   private closeScreen() {
+    this.game.input.cancelRebind();
     clear(this.screen);
     this.screen.className = '';
   }
 
   private open(card: HTMLElement) {
+    this.game.input.cancelRebind();
     clear(this.screen);
     this.screen.className = 'screen';
     this.screen.append(card);
@@ -85,8 +95,8 @@ export class UI {
   showMenu() {
     const g = this.game;
     const medals = Object.values(g.save.data.progress.medals).filter((m) => m.medal).length;
-    this.open(h('div', { class: 'card' },
-      h('div', { class: 'brand' }, h('div', { class: 'logo', html: 'VOLT<span>LINE</span>' }), h('div', { class: 'tag' }, 'Electric dirt-bike sandbox')),
+    this.open(h('div', { class: 'card menu-card' },
+      h('div', { class: 'brand' }, h('div', { class: 'logo', html: 'STARK <span>VARG</span>' }), h('div', { class: 'tag' }, 'EBike · electric dirt-bike sandbox')),
       h('div', { class: 'menu-grid' },
         this.btn('Ride — free roam', () => { g.endChallenge(); g.setState('ride'); }, 'primary'),
         this.btn('Garage', () => this.openGarage()),
@@ -106,7 +116,7 @@ export class UI {
   showPause() {
     const g = this.game;
     const tp = h('div', { class: 'btn-row' }, ...TELEPORTS.map(([id, name]) => h('button', { class: 'btn small', onclick: () => { g.endChallenge(); g.respawn(id); g.setState('ride'); } }, name)));
-    this.open(h('div', { class: 'card' },
+    this.open(h('div', { class: 'card menu-card' },
       h('h2', {}, 'Paused'),
       h('div', { class: 'menu-grid' },
         this.btn('Resume', () => g.setState('ride'), 'primary'),
@@ -190,6 +200,7 @@ export class UI {
     const tabs = h('div', { class: 'tabs' });
     const tabsDef = [['gameplay', 'Riding'], ['graphics', 'Graphics'], ['audio', 'Audio'], ['camera', 'Camera'], ['controls', 'Controls'], ['data', 'Data']] as const;
     const render = (t: string) => {
+      g.input.cancelRebind();
       clear(body);
       tabs.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', (x as HTMLElement).dataset.t === t));
       if (t === 'gameplay') {
@@ -208,6 +219,8 @@ export class UI {
         body.append(
           segmented('Quality', [{ id: 'low', name: 'Low' }, { id: 'medium', name: 'Medium' }, { id: 'high', name: 'High' }] as const, s.quality, (v) => set('quality', v)),
           h('div', { class: 'note' }, 'Low: no shadows, 1× resolution, fewer particles & pedestrians — best for older phones. Tree density applies on next launch.'),
+          toggle('Adaptive resolution', s.adaptiveResolution, (v) => set('adaptiveResolution', v)),
+          h('div', { class: 'note' }, 'Lowers the render resolution a little when frames get slow, and raises it again when there is headroom. Recommended on phones.'),
           toggle('Show FPS', s.showFps, (v) => set('showFps', v)),
         );
       } else if (t === 'audio') {
@@ -231,6 +244,7 @@ export class UI {
           btn.addEventListener('click', async () => {
             btn.textContent = 'Press a key…';
             const code = await g.input.listenForRebind();
+            if (!code) return; // cancelled (screen or tab changed)
             if (code !== 'Escape' || a === 'pause') {
               // Remove this key from other actions to avoid conflicts.
               for (const k of Object.keys(b) as Action[]) b[k] = b[k].filter((c) => c !== code);
@@ -259,8 +273,7 @@ export class UI {
             h('button', { class: 'btn small danger', onclick: () => {
               if (!confirm('Erase all builds, settings and progress?')) return;
               g.save.data = defaultSave();
-              void g.save.save();
-              location.reload();
+              void g.save.saveNow().then(() => location.reload());
             } }, 'Reset everything'),
           ),
           h('p', { class: 'note' }, 'iPhone tip: install to the Home Screen so Safari is less likely to evict saved data. Export your builds occasionally as a backup.'),
@@ -287,6 +300,8 @@ export class UI {
       [h('span', {}, k('steerLeft'), ' ', k('steerRight')), 'Steer — the rider leans the bike and countersteers for you'],
       [k('leanBack'), 'Lean back: shift weight / pop a wheelie / pull up in the air'],
       [k('leanForward'), 'Lean forward: keep the front down / stoppie / push down in the air'],
+      [k('wheelie'), 'WHEELIE button: hold to pop and hold a wheelie. Hold it too long (~3 s) and you loop out off the back!'],
+      [k('stoppie'), 'STOPPIE button: hold for a stoppie (weight forward + front brake). Too long at speed = over the bars.'],
       [k('reset'), 'Reset bike to the last safe spot'],
       [k('camera'), 'Cycle camera (chase / far / helmet)'],
       [k('mode'), 'Ride mode Eco / Standard / Sport'],
@@ -298,7 +313,7 @@ export class UI {
       h('h2', {}, 'How to ride'),
       h('div', { class: 'help-grid' }, ...rows.flatMap(([a, d]) => [a, h('span', {}, d)])),
       h('div', { class: 'g-section' }, 'Touch (landscape)'),
-      h('p', { class: 'note' }, 'Left stick: steer (left/right) and lean (up = forward, down = back). Right: tall THROTTLE pad (slide up for more), FRONT and REAR brake buttons. Top-right: pause, reset, camera, ride mode. Drag the upper-right area to look around. All buttons work simultaneously.'),
+      h('p', { class: 'note' }, 'Left stick: steer (left/right) and lean (up = forward, down = back). Right: tall THROTTLE pad (slide up for more), FRONT and REAR brake buttons, and WHEELIE / STOPPIE trick buttons above the brakes. The wheelie button fills red the longer you hold it: let go before it is full or you fall off the back. Top-right: pause, reset, camera, ride mode. Drag the upper-right area to look around. All buttons work simultaneously.'),
       h('div', { class: 'g-section' }, 'Tips'),
       h('p', { class: 'note' }, 'Drifts: on dirt, steer into a turn and roll on the throttle with a torquey motor — or tap the rear brake to unsettle the rear, then hold throttle and let the bars follow the slide. Wheelies: lean back + throttle, then feather the throttle to hold the balance point; tap the rear brake to drop the front. Jumps: neutral bars for a level landing, lean to rotate. Customize in the garage: gearing, tires and suspension all change the physics.'),
       h('div', { class: 'btn-row', style: 'margin-top:14px' }, h('button', { class: 'btn primary', onclick: () => (back === 'menu' ? this.showMenu() : this.showPause()) }, 'Back')),

@@ -16,6 +16,8 @@ export type BoxKind = 'building' | 'sidewalk' | 'container' | 'ramp' | 'support'
 export interface WorldBox extends BoxDef {
   kind: BoxKind;
   color?: number;
+  /** Render style for buildings / visual boxes (façade material). */
+  style?: string;
 }
 export interface Marking { x: number; z: number; w: number; l: number; yaw: number; color: number; y?: number }
 export interface P2 { x: number; z: number }
@@ -39,6 +41,18 @@ export interface WorldData {
   stunt: { x: number; z: number; w: number; d: number };
   garagePad: { x: number; z: number; r: number };
   labels: { text: string; x: number; z: number; yaw: number; y: number }[];
+  /** Purely visual dressing (colliders, where needed, are in `boxes`). */
+  decor: Decor;
+}
+
+export interface Decor {
+  flags: { x: number; z: number; yaw: number; color: number }[];
+  tires: { x: number; z: number; color: number }[];
+  chargers: { x: number; z: number; yaw: number }[];
+  bushes: { x: number; z: number; s: number }[];
+  /** Visual-only boxes (shopfronts, cornices, awnings, rooftop units); no collision. */
+  vboxes: WorldBox[];
+  tanks: { x: number; y: number; z: number }[];
 }
 
 export const WORLD = { size: 800, cell: 2.5, half: 400 };
@@ -220,6 +234,8 @@ export function generateWorld(seed = 7): WorldData {
   }
 
   const box = (b: WorldBox) => boxes.push(b);
+  const decor: Decor = { flags: [], tires: [], chargers: [], bushes: [], vboxes: [], tanks: [] };
+  const vbox = (b: WorldBox) => decor.vboxes.push(b);
   const groundAt = (x: number, z: number) => hf.heightAt(x, z);
 
   /** A ramp rising along `yaw` from (x,z): length L, height H, width W. */
@@ -245,7 +261,57 @@ export function generateWorld(seed = 7): WorldData {
   };
 
   // --- City ---------------------------------------------------------------
-  const BUILD_COLORS = [0xc9b9a3, 0xa8b4bf, 0xd8cdb8, 0x9aa6a0, 0xb79a85, 0xc4c8cc, 0x8f9aa8, 0xd6c2a0];
+  const FLOOR = 3.5;
+  const STYLE_COLORS: Record<string, number[]> = {
+    brick: [0xffffff, 0xf0e2da, 0xe6d6cf],
+    office: [0xffffff, 0xe8f0f6, 0xdfe6ea],
+    apartment: [0xf3efe6, 0xe9d9c4, 0xd6e0e4, 0xe8d0c8, 0xd9dcc8],
+    stucco: [0xf6e7c8, 0xf2d7c0, 0xe9e4d8, 0xdcc7a8, 0xf0dcd6],
+  };
+  const AWNINGS = [0x2f6f4f, 0xb03a2e, 0x1f4e79, 0xc79a2b, 0x5b3a6b, 0x2b2f36];
+  /** One building on a lot: main mass (collider), optional setback tower, shopfront base, cornice, rooftop units. */
+  const building = (x0: number, x1: number, z0: number, z1: number, block: { x0: number; x1: number; z0: number; z1: number }, downtown: boolean) => {
+    const rr = rnd();
+    const style = downtown ? (rr < 0.7 ? 'office' : 'apartment') : rr < 0.32 ? 'brick' : rr < 0.62 ? 'apartment' : rr < 0.82 ? 'stucco' : 'office';
+    const floors = style === 'office' ? 6 + Math.floor(rnd() * (downtown ? 9 : 5)) : style === 'stucco' ? 2 + Math.floor(rnd() * 3) : style === 'brick' ? 3 + Math.floor(rnd() * 4) : 4 + Math.floor(rnd() * 5);
+    const hgt = floors * FLOOR + 0.6;
+    const cols = STYLE_COLORS[style];
+    const color = cols[Math.floor(rnd() * cols.length)];
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, sx = x1 - x0 - 0.4, sz = z1 - z0 - 0.4;
+    const base = 0.15;
+    box({ kind: 'building', style, color, x: cx, y: base + hgt / 2, z: cz, sx, sy: hgt, sz });
+    // Cornice / parapet cap.
+    vbox({ kind: 'building', style: 'trim', color: style === 'office' ? 0x8c949e : 0xd9d3c7, x: cx, y: base + hgt + 0.3, z: cz, sx: sx + 0.5, sy: 0.6, sz: sz + 0.5 });
+    let roofY = base + hgt + 0.6;
+    // Setback tower on tall offices.
+    if (style === 'office' && floors >= 9) {
+      const tf = 3 + Math.floor(rnd() * 6), th = tf * FLOOR;
+      box({ kind: 'building', style, color, x: cx, y: roofY + th / 2, z: cz, sx: sx * 0.66, sy: th, sz: sz * 0.66 });
+      vbox({ kind: 'building', style: 'trim', color: 0x8c949e, x: cx, y: roofY + th + 0.25, z: cz, sx: sx * 0.66 + 0.4, sy: 0.5, sz: sz * 0.66 + 0.4 });
+      roofY += th + 0.5;
+    }
+    // Shopfront base on everything but offices (offices get a glazed lobby via their own façade).
+    if (style !== 'office') {
+      vbox({ kind: 'building', style: 'shop', color: 0xffffff, x: cx, y: base + 2.1, z: cz, sx: sx + 0.12, sy: 4.2, sz: sz + 0.12 });
+      // Awnings over the street-facing sides.
+      const ac = AWNINGS[Math.floor(rnd() * AWNINGS.length)];
+      const sides: [number, number, number, number, number][] = [];
+      if (Math.abs(z0 - block.z0) < 0.5) sides.push([cx, z0 - 0.2 - 0.7, sx * 0.8, 1.4, 1]);
+      if (Math.abs(z1 - block.z1) < 0.5) sides.push([cx, z1 + 0.2 + 0.7, sx * 0.8, 1.4, -1]);
+      for (const [ax, az, aw, ad, dir] of sides) vbox({ kind: 'building', style: 'awning', color: ac, x: ax, y: base + 4.0, z: az, sx: aw, sy: 0.12, sz: ad, pitch: -0.28 * dir });
+      const sidesX: [number, number][] = [];
+      if (Math.abs(x0 - block.x0) < 0.5) sidesX.push([x0 - 0.9, 1]);
+      if (Math.abs(x1 - block.x1) < 0.5) sidesX.push([x1 + 0.9, -1]);
+      for (const [axx, dir] of sidesX) vbox({ kind: 'building', style: 'awning', color: ac, x: axx, y: base + 4.0, z: cz, sx: 1.4, sy: 0.12, sz: sz * 0.8, roll: 0.28 * dir });
+    }
+    // Rooftop: AC units and the odd water tank.
+    const units = 1 + Math.floor(rnd() * 3);
+    for (let u = 0; u < units; u++) {
+      const ux = cx + (rnd() - 0.5) * sx * 0.5, uz = cz + (rnd() - 0.5) * sz * 0.5;
+      vbox({ kind: 'building', style: 'metal', color: 0xb8bcc2, x: ux, y: roofY + 0.6, z: uz, sx: 1.8, sy: 1.2, sz: 1.3 });
+    }
+    if ((style === 'brick' || style === 'apartment') && rnd() < 0.45) decor.tanks.push({ x: cx + sx * 0.2, y: roofY, z: cz - sz * 0.2 });
+  };
   for (let bx = 0; bx < CITY_X.length - 1; bx++) {
     for (let bz = 0; bz < CITY_Z.length - 1; bz++) {
       const x0 = CITY_X[bx] + ROAD_HALF, x1 = CITY_X[bx + 1] - ROAD_HALF;
@@ -297,8 +363,29 @@ export function generateWorld(seed = 7): WorldData {
         ? [[ix0, ix1, iz0, (iz0 + iz1) / 2 - 3.5], [ix0, ix1, (iz0 + iz1) / 2 + 3.5, iz1]]
         : [[ix0, (ix0 + ix1) / 2 - 1, iz0, iz1], [(ix0 + ix1) / 2 + 1, ix1, iz0, iz1]];
       for (const [ax0, ax1, az0, az1] of halves) {
-        const hgt = 9 + Math.floor(rnd() * 5) * 4;
-        box({ kind: 'building', color: BUILD_COLORS[Math.floor(rnd() * BUILD_COLORS.length)], x: (ax0 + ax1) / 2, y: 0.15 + hgt / 2, z: (az0 + az1) / 2, sx: ax1 - ax0, sy: hgt, sz: az1 - az0 });
+        // Split the half-block into lots along its longer side: a row of distinct buildings.
+        const alongX = ax1 - ax0 >= az1 - az0;
+        const span = alongX ? ax1 - ax0 : az1 - az0;
+        const cuts = [0];
+        while (cuts[cuts.length - 1] < span - 1) {
+          const remain = span - cuts[cuts.length - 1];
+          cuts.push(remain < 30 ? span : cuts[cuts.length - 1] + 13 + rnd() * 13);
+        }
+        for (let li = 0; li < cuts.length - 1; li++) {
+          const a0 = cuts[li] + (li ? 0.0 : 0), a1 = cuts[li + 1];
+          const lx0 = alongX ? ax0 + a0 : ax0, lx1 = alongX ? ax0 + a1 : ax1;
+          const lz0 = alongX ? az0 : az0 + a0, lz1 = alongX ? az1 : az0 + a1;
+          building(lx0, lx1, lz0, lz1, { x0: ix0, x1: ix1, z0: iz0, z1: iz1 }, bx === 3 && bz > 0 && bz < 3);
+        }
+      }
+      // Street trees along the curbs (gaps left at the corners and crossings).
+      for (let t = 10; t < w - 10; t += 13) {
+        trees.push({ x: x0 + t, z: z0 + 1.1, s: 0.85 + rnd() * 0.15, kind: 1 });
+        trees.push({ x: x0 + t, z: z1 - 1.1, s: 0.85 + rnd() * 0.15, kind: 1 });
+      }
+      for (let t = 12; t < d - 12; t += 13) {
+        trees.push({ x: x0 + 1.1, z: z0 + t, s: 0.85 + rnd() * 0.15, kind: 1 });
+        trees.push({ x: x1 - 1.1, z: z0 + t, s: 0.85 + rnd() * 0.15, kind: 1 });
       }
       if (alley) {
         // The alley between the two buildings gets a couple of crates.
@@ -326,7 +413,7 @@ export function generateWorld(seed = 7): WorldData {
 
   // --- Hub ----------------------------------------------------------------
   box({ kind: 'garage', color: 0x2a2f38, x: 20, y: 4, z: 46, sx: 28, sy: 8, sz: 16 });
-  labels.push({ text: 'VOLTLINE GARAGE', x: 20, z: 37.9, y: 6.6, yaw: Math.PI });
+  labels.push({ text: 'STARK VARG GARAGE', x: 20, z: 37.9, y: 6.6, yaw: Math.PI });
   const garagePad = { x: 20, z: 32, r: 5 };
   markings.push({ x: garagePad.x, z: garagePad.z, w: 9, l: 7, yaw: 0, color: 0x1f6f8b, y: 0.02 });
   for (let i = 0; i < 4; i++) lights.push({ x: HUB.x0 + 10 + i * 30, z: HUB.z0 + 4, yaw: 0 });
@@ -452,6 +539,66 @@ export function generateWorld(seed = 7): WorldData {
     const p = track[i], q = track[(i + 1) % track.length];
     checkpoints.push({ x: p.x, z: p.z, yaw: Math.atan2(q.x - p.x, q.z - p.z) });
   }
+  // --- Dressing: feather flags, tyre stacks, chargers, planters -------------------
+  const FLAG_COLORS = [0xc6f432, 0xffffff, 0x38d9f5, 0x1d2129];
+  const flag = (x: number, z: number, yaw: number, i: number) => {
+    decor.flags.push({ x, z, yaw, color: FLAG_COLORS[i % FLAG_COLORS.length] });
+    box({ kind: 'invisible', tag: 'pole', x, y: groundAt(x, z) + 2, z, sx: 0.12, sy: 4, sz: 0.12 });
+  };
+  const tireStack = (x: number, z: number, i: number) => {
+    decor.tires.push({ x, z, color: i % 3 === 0 ? 0xe9e9e9 : i % 3 === 1 ? 0xd8372f : 0x1b1c1f });
+    box({ kind: 'invisible', x, y: groundAt(x, z) + 0.45, z, sx: 0.8, sy: 0.9, sz: 0.8 });
+  };
+  // Hub: flags along the plaza edges, chargers by the garage, planters with bushes.
+  for (let i = 0, x = HUB.x0 + 6; x < HUB.x1 - 4; x += 14, i++) flag(x, HUB.z0 + 1.5, 0, i);
+  for (let i = 0, z = HUB.z0 + 12; z < HUB.z1 - 20; z += 14, i++) flag(HUB.x1 - 1.5, z, Math.PI / 2, i + 1);
+  for (let i = 0; i < 4; i++) {
+    const x = 42 + i * 4.5, z = 33;
+    decor.chargers.push({ x, z, yaw: Math.PI });
+    box({ kind: 'invisible', x, y: groundAt(x, z) + 0.9, z, sx: 0.7, sy: 1.8, sz: 0.5 });
+  }
+  for (const [px, pz] of [[-6, 30], [2, 30], [38, 30], [62, 30]] as const) {
+    box({ kind: 'barrier', color: 0x8d8a84, x: px, y: groundAt(px, pz) + 0.3, z: pz, sx: 3.2, sy: 0.6, sz: 1.4 });
+    for (let k = 0; k < 3; k++) decor.bushes.push({ x: px - 1 + k, z: pz + (k % 2) * 0.3 - 0.15, s: 0.32 + (k % 2) * 0.08 });
+  }
+  // Plaza islands: raised planters with trees and bushes break up the open concrete.
+  for (const [ix, iz] of [[50, -30], [-2, -42], [56, 6]] as const) {
+    box({ kind: 'sidewalk', x: ix, y: groundAt(ix, iz) + 0.12, z: iz, sx: 9, sy: 0.24, sz: 9, surface: 'grass' as const, color: 0x6f8f4a });
+    for (const t of [{ x: ix - 2, z: iz - 1.5, s: 0.9, kind: 1 }, { x: ix + 2.2, z: iz + 2, s: 0.8, kind: 1 }]) {
+      trees.push(t);
+      box({ kind: 'invisible', tag: 'pole', x: t.x, y: groundAt(t.x, t.z) + 2, z: t.z, sx: 0.5 * t.s, sy: 4, sz: 0.5 * t.s });
+    }
+    for (let k = 0; k < 4; k++) decor.bushes.push({ x: ix - 3 + k * 2, z: iz + (k % 2 ? 3.2 : -3.4), s: 0.3 });
+  }
+  // MX track: alternating flags just outside the track, tyre stacks on the outside of turns.
+  {
+    let acc = 0, flagI = 0, tireAcc = 0;
+    const n = track.length;
+    for (let i = 0; i < n; i++) {
+      const a = track[i], b = track[(i + 1) % n], c = track[(i + 2) % n];
+      const seg = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      const tx = (b.x - a.x) / seg, tz = (b.z - a.z) / seg;
+      const ux = c.x - b.x, uz = c.z - b.z;
+      const turn = tx * uz - tz * ux; // + = turning left
+      acc += seg;
+      tireAcc += seg;
+      if (acc > 28) {
+        acc = 0;
+        const side = flagI % 2 ? 1 : -1;
+        const off = TRACK_HALF + 6.5;
+        flag(a.x - tz * off * side, a.z + tx * off * side, Math.atan2(tx, tz), flagI++);
+      }
+      if (Math.abs(turn) > 0.35 && tireAcc > 3.2) {
+        tireAcc = 0;
+        const side = turn > 0 ? -1 : 1; // outside of the turn
+        const off = TRACK_HALF + 5.5;
+        tireStack(a.x - tz * off * side, a.z + tx * off * side, i);
+      }
+    }
+  }
+  // Stunt park perimeter flags.
+  for (let i = 0; i < 6; i++) flag(STUNT.x - STUNT.w / 2 + 6 + i * 19, STUNT.z - STUNT.d / 2 - 2, 0, i);
+
   // Track flag poles at start
   labels.push({ text: 'MX TRACK', x: track[0].x, z: track[0].z, y: groundAt(track[0].x, track[0].z) + 4.5, yaw: checkpoints[0].yaw + Math.PI });
 
@@ -472,6 +619,6 @@ export function generateWorld(seed = 7): WorldData {
   return {
     terrain: hf, boxes, markings, trees, rocks, lights, cones, pedPaths, collectibles, spawns,
     track: { points: track, checkpoints, halfWidth: TRACK_HALF },
-    drag, driftPad: DRIFT, handling: { x: HANDLING.x, z: HANDLING.z, gates }, stunt: STUNT, garagePad, labels,
+    drag, driftPad: DRIFT, handling: { x: HANDLING.x, z: HANDLING.z, gates }, stunt: STUNT, garagePad, labels, decor,
   };
 }

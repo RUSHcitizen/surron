@@ -21,6 +21,8 @@ export interface PowertrainInput {
   rearGrounded: boolean;
   speed: number;
   dt: number;
+  /** Rider is deliberately wheelieing (trick button): wheelie control stays out of it. */
+  wheelieOverride?: boolean;
 }
 
 export type DrainMode = 'realistic' | 'relaxed' | 'off';
@@ -136,7 +138,7 @@ export class Powertrain {
     }
     // Wheelie control: limit pitch past ~24°.
     this.wcActive = false;
-    if (sp.wheelieControl && i.frontAirborne && i.rearGrounded && i.pitch > 0.36 && target > 0) {
+    if (sp.wheelieControl && !i.wheelieOverride && i.frontAirborne && i.rearGrounded && i.pitch > 0.36 && target > 0) {
       target *= Math.max(0, 1 - (i.pitch - 0.36) * 5);
       this.wcActive = true;
       this.limiter = 'wheelie';

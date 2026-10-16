@@ -50,7 +50,6 @@ export class ChallengeRun {
   extra: Record<string, number> = {};
   private idx = 0;
   private start = { x: 0, z: 0 };
-  private baseScore = 0;
   private baseDrift = 0;
   private v0 = 0;
   private brakeStart: { x: number; z: number } | null = null;
@@ -178,7 +177,7 @@ export class ChallengeRun {
       }
       case 'stunt': {
         const now = ctx.scorer.running;
-        this.result = Math.max(this.result, this.baseScore + (now - this.baseScore));
+        // Banked points only go up; a crash busts the unbanked chain, which is the risk.
         this.result = now;
         return;
       }

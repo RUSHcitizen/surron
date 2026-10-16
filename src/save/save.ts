@@ -31,6 +31,7 @@ export interface Settings {
   leftHanded: boolean;
   rideMode: RideMode;
   pedestrians: boolean;
+  adaptiveResolution: boolean;
 }
 
 export interface MedalRecord { best: number; medal: 'gold' | 'silver' | 'bronze' | null; buildName?: string }
@@ -60,6 +61,7 @@ export function defaultSettings(): Settings {
     master: 0.8, motor: 0.8, sfx: 0.8, ambience: 0.5, quality: touch ? 'medium' : 'high', assist: 0.65,
     camDistance: 4.2, camSensitivity: 1, steerSensitivity: 1, units: 'kmh', showTelemetry: true, showFps: false,
     timeOfDay: 'day', drain: 'relaxed', touchControls: 'auto', leftHanded: false, rideMode: 'standard', pedestrians: true,
+    adaptiveResolution: true,
   };
 }
 
@@ -96,6 +98,7 @@ export function migrate(raw: unknown): SaveData {
     drain: pick(s.drain, ['realistic', 'relaxed', 'off'] as const, ds.drain),
     touchControls: pick(s.touchControls, ['auto', 'on', 'off'] as const, 'auto'), leftHanded: s.leftHanded === true,
     rideMode: pick(s.rideMode, ['eco', 'standard', 'sport'] as const, 'standard'), pedestrians: s.pedestrians !== false,
+    adaptiveResolution: s.adaptiveResolution !== false,
   };
   const builds = Array.isArray(r.builds) ? r.builds.slice(0, 60).map(sanitizeBuild) : d.builds;
   // De-duplicate ids
@@ -238,6 +241,18 @@ export class SaveSystem {
     return this.data;
   }
 
+  /** Write immediately (app backgrounding / reload), after any in-flight write. */
+  async saveNow() {
+    this.writing = this.writing.then(async () => {
+      try {
+        await this.backend.set('save', JSON.stringify(this.data));
+      } catch {
+        this.warning = 'Saving failed (storage full?).';
+      }
+    });
+    return this.writing;
+  }
+
   /** Debounced, serialised write. */
   save() {
     if (this.pending) return this.writing;
@@ -266,7 +281,7 @@ export function exportBuild(b: BikeBuild): string {
 export function importBuild(text: string): BikeBuild {
   const parsed = JSON.parse(text);
   const raw = parsed && parsed.format === 'voltline-build' ? parsed.build : parsed;
-  if (!raw || typeof raw !== 'object' || !raw.parts) throw new Error('Not a Voltline build file');
+  if (!raw || typeof raw !== 'object' || !raw.parts) throw new Error('Not a Stark Varg EBike build file');
   const b = sanitizeBuild(raw);
   b.id = `imp-${Date.now().toString(36)}`;
   return b;
