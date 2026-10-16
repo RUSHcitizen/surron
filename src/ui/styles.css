@@ -172,7 +172,7 @@ input[type='range'] { accent-color: var(--accent); }
 .t-stick.pressed .t-knob { background: rgba(198, 244, 50, 0.5); border-color: var(--accent); }
 .t-hint { position: absolute; left: 0; right: 0; bottom: -16px; text-align: center; font-size: 9px; letter-spacing: 0.12em; color: rgba(255, 255, 255, 0.4); font-weight: 700; }
 .t-right { position: absolute; right: calc(18px + var(--safe-r)); bottom: calc(18px + var(--safe-b)); display: grid; grid-template-columns: 80px 80px 96px; grid-template-rows: 80px 80px; gap: 10px; }
-.t-btn { border-radius: 18px; background: rgba(255, 255, 255, 0.1); border: 2px solid rgba(255, 255, 255, 0.2); display: flex; align-items: center; justify-content: center; text-align: center; font-size: 12px; font-weight: 800; letter-spacing: 0.05em; line-height: 1.1; color: rgba(255, 255, 255, 0.85); }
+.t-btn { flex-direction: column; border-radius: 18px; background: rgba(255, 255, 255, 0.1); border: 2px solid rgba(255, 255, 255, 0.2); display: flex; align-items: center; justify-content: center; text-align: center; font-size: 12px; font-weight: 800; letter-spacing: 0.05em; line-height: 1.1; color: rgba(255, 255, 255, 0.85); }
 .t-btn small { font-weight: 600; font-size: 9px; color: rgba(255, 255, 255, 0.55); }
 .t-btn.pressed { background: rgba(255, 84, 104, 0.45); border-color: var(--bad); }
 .t-rear { grid-column: 1; grid-row: 2; }
@@ -183,12 +183,15 @@ input[type='range'] { accent-color: var(--accent); }
 .t-throttle.pressed { border-color: var(--accent); }
 .t-top { position: absolute; top: calc(10px + var(--safe-t)); right: calc(12px + var(--safe-r)); display: flex; gap: 8px; }
 .t-mini { width: 46px; height: 46px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.2); background: rgba(10, 12, 16, 0.55); font-size: 17px; color: #fff; }
-.t-orbit { position: absolute; top: 25%; right: 0; width: 45%; height: 35%; }
+.t-orbit { position: absolute; top: calc(64px + var(--safe-t)); bottom: calc(205px + var(--safe-b)); right: 0; width: 50%; }
 .touch-ui.left-handed .t-stick { left: auto; right: calc(18px + var(--safe-r)); }
 .touch-ui.left-handed .t-right { right: auto; left: calc(18px + var(--safe-l)); }
 .touch-ui.left-handed .t-orbit { right: auto; left: 0; }
-body.touching .hud-speedo { right: auto; left: 50%; transform: translateX(-50%); bottom: calc(10px + var(--safe-b)); min-width: 180px; padding: 8px 12px; }
-body.touching .hud-speed { font-size: 32px; }
+body.touching .hud-speedo { right: auto; bottom: auto; left: calc(10px + var(--safe-l)); top: calc(10px + var(--safe-t)); min-width: 150px; padding: 6px 10px; }
+body.touching .hud-speed { font-size: 28px; }
+body.touching .hud-mode { top: 8px; right: 8px; }
+body.touching .hud-bars .hud-line:nth-of-type(n+3), body.touching .hud-bars .bar.temp, body.touching .hud-bars .bar.regen { display: none; }
+body.touching .hud-challenge { top: calc(64px + var(--safe-t)); }
 body.touching .hud-tele { display: none; }
 
 /* --- Garage ------------------------------------------------------------------ */

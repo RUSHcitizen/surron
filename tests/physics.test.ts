@@ -1,0 +1,296 @@
+/**
+ * Repeatable physics scenarios. These run the same BikeDynamics the game uses.
+ */
+import { describe, expect, it } from 'vitest';
+import { computeVehicleSpec } from '../src/vehicle/spec';
+import { defaultBuild, PRESETS, cloneBuild } from '../src/vehicle/build';
+import type { BikeBuild } from '../src/vehicle/build';
+import { accelTest, brakeTest, launchThrottle, makeBike, run, settle, turnTest } from '../src/physics/sim';
+import { emptyInput } from '../src/physics/bike';
+import type { BikeDynamics } from '../src/physics/bike';
+import { CollisionWorld, flatWorld } from '../src/world/collision';
+import { generateWorld } from '../src/world/layout';
+import { Vector3 } from 'three';
+
+const stock = () => computeVehicleSpec(defaultBuild());
+const preset = (id: string) => PRESETS.find((p) => p.id === id)!;
+const cruise = (target: number) => (b: BikeDynamics) => Math.max(0, Math.min(1, (target - b.speed) * 0.6 + 0.12));
+const deg = (r: number) => (r * 180) / Math.PI;
+
+describe('static behaviour', () => {
+  it('settles upright with sensible sag and no drift', () => {
+    const bike = makeBike(stock());
+    settle(bike, 3);
+    expect(Math.abs(bike.lean)).toBeLessThan(0.02);
+    expect(Math.abs(deg(bike.pitch))).toBeLessThan(3);
+    expect(bike.front.compression / bike.spec.front.travel).toBeGreaterThan(0.15);
+    expect(bike.front.compression / bike.spec.front.travel).toBeLessThan(0.45);
+    expect(bike.rear.compression / bike.spec.rear.travel).toBeGreaterThan(0.15);
+    expect(bike.vel.length()).toBeLessThan(0.05);
+  });
+
+  it('every preset settles without crashing', () => {
+    for (const p of PRESETS) {
+      const bike = makeBike(computeVehicleSpec(p));
+      settle(bike, 2);
+      expect(bike.crashed, p.name).toBe(false);
+      expect(bike.front.grounded && bike.rear.grounded, p.name).toBe(true);
+    }
+  });
+});
+
+describe('acceleration, top speed and braking', () => {
+  it('stock bike: realistic 0-50 and top speed', () => {
+    const r = accelTest(stock());
+    expect(r.crashed).toBe(false);
+    expect(r.t0to50!).toBeGreaterThan(2.5);
+    expect(r.t0to50!).toBeLessThan(5.5);
+    expect(r.topSpeed * 3.6).toBeGreaterThan(65);
+    expect(r.topSpeed * 3.6).toBeLessThan(90);
+  });
+
+  it('a more powerful build accelerates harder', () => {
+    const a = accelTest(stock());
+    const b = accelTest(computeVehicleSpec(preset('hornet')));
+    expect(b.t0to50!).toBeLessThan(a.t0to50!);
+    expect(b.topSpeed).toBeGreaterThan(a.topSpeed);
+  });
+
+  it('brakes from 50 km/h in a realistic distance without flipping', () => {
+    for (const p of PRESETS) {
+      const r = brakeTest(computeVehicleSpec(p));
+      expect(r.crashed, p.name).toBe(false);
+      expect(r.distance, p.name).toBeGreaterThan(9);
+      expect(r.distance, p.name).toBeLessThan(22);
+    }
+  });
+
+  it('stronger brakes stop shorter', () => {
+    const weak = brakeTest(stock());
+    const b = defaultBuild();
+    b.parts.brakes = 'race';
+    const strong = brakeTest(computeVehicleSpec(b));
+    expect(strong.distance).toBeLessThan(weak.distance);
+  });
+});
+
+describe('cornering', () => {
+  it('steady turns match the lean/radius equilibrium tanφ = v²/(gR)', () => {
+    for (const [kmh, steer] of [[20, 0.5], [40, 0.5], [40, 1], [60, 1]]) {
+      const t = turnTest(stock(), kmh, steer);
+      expect(t.crashed, `${kmh} ${steer}`).toBe(false);
+      const theory = Math.atan((t.speed * t.speed) / (9.81 * t.radius));
+      expect(Math.abs(deg(Math.abs(t.lean)) - deg(theory)), `${kmh} km/h steer ${steer}`).toBeLessThan(4);
+    }
+  });
+
+  it('steering right turns right and leans right', () => {
+    const t = turnTest(stock(), 30, 0.6);
+    expect(t.bike.lean).toBeGreaterThan(0.1);
+    expect(t.yawRate).toBeLessThan(0); // negative yaw about +Y = clockwise from above = right
+  });
+
+  it('low speed full lock makes a tight U-turn without falling', () => {
+    const bike = makeBike(stock());
+    settle(bike);
+    let yaw = 0;
+    run(bike, 8, (_t, b) => ({ ...emptyInput(), throttle: cruise(3)(b), steer: 1 }), (_t, b) => { yaw += b.yawRate / 240; return b.crashed; });
+    expect(bike.crashed).toBe(false);
+    expect(Math.abs(yaw)).toBeGreaterThan(Math.PI * 1.5);
+  });
+
+  it('survives full-lock slaloms at several speeds', () => {
+    for (const v of [8, 11, 16]) {
+      const bike = makeBike(stock());
+      settle(bike);
+      run(bike, 20, (_t, b) => ({ ...emptyInput(), throttle: cruise(v)(b) }), (_t, b) => b.speed >= v);
+      run(bike, 8, (t, b) => ({ ...emptyInput(), throttle: cruise(v)(b), steer: Math.sin(t * 2.5) > 0 ? 1 : -1 }), (_t, b) => b.crashed);
+      expect(bike.crashed, `slalom ${v}`).toBe(false);
+    }
+  });
+
+  it('with zero assist, demanding too much lean can lowside (the assist matters)', () => {
+    const spec = stock();
+    const bike = makeBike(spec);
+    bike.assist = 0;
+    settle(bike);
+    run(bike, 20, (_t, b) => ({ ...emptyInput(), throttle: cruise(17)(b) }), (_t, b) => b.speed >= 17);
+    run(bike, 6, () => ({ ...emptyInput(), throttle: 1, steer: 1 }), (_t, b) => b.crashed);
+    const assisted = turnTest(spec, 60, 1);
+    expect(assisted.crashed).toBe(false);
+    expect(bike.crashed || Math.abs(bike.lean) > assisted.maxLean).toBe(true);
+  });
+});
+
+describe('wheelies, slides and jumps', () => {
+  it('a rider can hold a controlled wheelie', () => {
+    const bike = makeBike(stock());
+    settle(bike);
+    let wt = 0;
+    run(bike, 8, (_t, b) => {
+      const pr = b.angVel.dot(new Vector3(1, 0, 0).applyQuaternion(b.quat));
+      return { ...emptyInput(), throttle: b.front.grounded ? 1 : Math.max(0, Math.min(1, 0.6 + (0.5 - b.pitch) * 3 + pr * 1.2)), lean: b.pitch < 0.15 ? -1 : 0, rearBrake: b.pitch > 0.65 ? 1 : 0 };
+    }, (_t, b) => { if (!b.front.grounded && b.rear.grounded) wt += 1 / 240; return b.crashed; });
+    expect(bike.crashed).toBe(false);
+    expect(wt).toBeGreaterThan(2);
+  });
+
+  it('a short swingarm wheelies more readily than a drag swingarm', () => {
+    const mk = (arm: string) => {
+      const b = defaultBuild();
+      b.parts.motor = 'brick10';
+      b.parts.controller = 'trail90';
+      b.parts.swingarm = arm;
+      const bike = makeBike(computeVehicleSpec(b));
+      settle(bike);
+      let maxPitch = 0;
+      run(bike, 1.5, () => ({ ...emptyInput(), throttle: 1 }), (_t, x) => { maxPitch = Math.max(maxPitch, x.pitch); return x.crashed; });
+      return maxPitch;
+    };
+    expect(mk('short')).toBeGreaterThan(mk('ext120'));
+  });
+
+  it('power slides on dirt can be sustained without crashing', () => {
+    const bike = makeBike(computeVehicleSpec(preset('dart')), flatWorld(2000, 'dirt'));
+    settle(bike);
+    run(bike, 20, (_t, b) => ({ ...emptyInput(), throttle: b.front.grounded ? cruise(8)(b) : 0, lean: 1 }), (_t, b) => b.speed >= 8);
+    let slipTime = 0;
+    run(bike, 6, (_t, b) => ({ ...emptyInput(), throttle: Math.max(0, Math.min(1, 0.65 + (0.5 - Math.abs(b.rear.slipAngle)) * 2.2 - Math.abs(b.yawRate) * 0.1)), steer: 0.7 }),
+      (_t, b) => { if (Math.abs(b.rear.slipAngle) > 0.2 && b.speed > 2) slipTime += 1 / 240; return b.crashed; });
+    expect(bike.crashed).toBe(false);
+    expect(slipTime).toBeGreaterThan(3);
+  });
+
+  it('traction control suppresses the power slide', () => {
+    const b = cloneBuild(preset('dart'));
+    b.parts.controller = 'trail90';
+    b.tuning.tractionControl = true;
+    const bike = makeBike(computeVehicleSpec(b), flatWorld(2000, 'dirt'));
+    settle(bike);
+    run(bike, 20, (_t, x) => ({ ...emptyInput(), throttle: x.front.grounded ? cruise(8)(x) : 0, lean: 1 }), (_t, x) => x.speed >= 8);
+    let maxSlip = 0;
+    run(bike, 4, () => ({ ...emptyInput(), throttle: 1, steer: 0.7 }), (_t, x) => { maxSlip = Math.max(maxSlip, x.rear.slipRatio); return x.crashed; });
+    expect(maxSlip).toBeLessThan(0.45);
+  });
+
+  it('lands a kicker jump in the stunt park and scores airtime', () => {
+    const wd = generateWorld();
+    const world = new CollisionWorld(wd.terrain);
+    for (const b of wd.boxes) world.addBox(b);
+    const bike = makeBike(computeVehicleSpec(preset('mudlark')), world);
+    bike.place(-20, -25, 0);
+    let maxAir = 0;
+    run(bike, 4, (_t, b) => ({ ...emptyInput(), throttle: Math.min(launchThrottle(b), cruise(10)(b)), lean: b.airTime > 0 ? 0 : 0.6 }), (_t, b) => { maxAir = Math.max(maxAir, b.airTime); return b.crashed; });
+    expect(bike.crashed).toBe(false);
+    expect(maxAir).toBeGreaterThan(0.5);
+  });
+
+  it('rides over a city curb', () => {
+    const wd = generateWorld();
+    const world = new CollisionWorld(wd.terrain);
+    for (const b of wd.boxes) world.addBox(b);
+    const bike = makeBike(stock(), world);
+    bike.place(-50, -120, -Math.PI / 2);
+    run(bike, 4, (_t, b) => ({ ...emptyInput(), throttle: cruise(6)(b), lean: 0.5 }), (_t, b) => b.crashed);
+    expect(bike.crashed).toBe(false);
+    expect(bike.pos.y).toBeGreaterThan(0.8); // up on the sidewalk slab
+  });
+});
+
+describe('robustness', () => {
+  it('random input fuzz never produces NaN and crashes always recover via reset', () => {
+    const bike = makeBike(stock());
+    settle(bike);
+    let seed = 1;
+    const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    let inp = emptyInput();
+    for (let i = 0; i < 240 * 40; i++) {
+      if (i % 60 === 0) inp = { throttle: r(), frontBrake: r() < 0.2 ? r() : 0, rearBrake: r() < 0.2 ? r() : 0, steer: r() * 2 - 1, lean: r() * 2 - 1 };
+      bike.step(inp);
+      bike.events.length = 0;
+      if (bike.wantsReset) bike.reset();
+      expect(Number.isFinite(bike.pos.x + bike.pos.y + bike.pos.z + bike.quat.w)).toBe(true);
+    }
+    expect(bike.pos.y).toBeGreaterThan(-5);
+  });
+
+  it('reset after a crash returns an upright, grounded bike', () => {
+    const bike = makeBike(stock());
+    settle(bike);
+    run(bike, 3, () => ({ ...emptyInput(), throttle: 0.5 }));
+    bike.crash('test');
+    bike.reset();
+    settle(bike, 1);
+    expect(bike.crashed).toBe(false);
+    expect(Math.abs(bike.lean)).toBeLessThan(0.05);
+    expect(bike.front.grounded && bike.rear.grounded).toBe(true);
+  });
+});
+
+describe('customization changes measurable behaviour', () => {
+  const variant = (mut: (b: BikeBuild) => void) => {
+    const b = defaultBuild();
+    mut(b);
+    return computeVehicleSpec(b);
+  };
+
+  it('shorter gearing: quicker launch, lower top speed', () => {
+    const tall = accelTest(variant((b) => { b.tuning.rearSprocket = 40; }));
+    const short = accelTest(variant((b) => { b.tuning.rearSprocket = 60; }));
+    expect(short.t0to50!).toBeLessThan(tall.t0to50!);
+    expect(short.topSpeed).toBeLessThan(tall.topSpeed);
+  });
+
+  it('a larger rear wheel lengthens effective gearing (higher top speed)', () => {
+    const small = accelTest(variant((b) => { b.rear.diameter = 16; }));
+    const big = accelTest(variant((b) => { b.rear.diameter = 19; b.rear.profile = 100; }));
+    expect(big.topSpeed).toBeGreaterThan(small.topSpeed);
+  });
+
+  it('knobby tires out-accelerate street tires on dirt; street wins on tarmac grip', () => {
+    const street = variant((b) => { b.front.tread = b.rear.tread = 'street'; });
+    const knobby = variant((b) => { b.front.tread = b.rear.tread = 'knobby'; });
+    expect(knobby.rear.tire.mu.dirt).toBeGreaterThan(street.rear.tire.mu.dirt);
+    expect(street.rear.tire.mu.asphalt).toBeGreaterThan(knobby.rear.tire.mu.asphalt);
+    const torque = (b: BikeBuild) => { b.parts.motor = 'brick10'; b.parts.controller = 'race150'; b.tuning.tractionControl = false; };
+    const sd = accelTest(variant((b) => { torque(b); b.front.tread = b.rear.tread = 'street'; }), 'dirt', 8);
+    const kd = accelTest(variant((b) => { torque(b); b.front.tread = b.rear.tread = 'knobby'; }), 'dirt', 8);
+    expect(kd.t0to50!).toBeLessThan(sd.t0to50!);
+  });
+
+  it('a heavier battery increases mass and roll inertia', () => {
+    const a = variant((b) => { b.parts.battery = 'lite60'; });
+    const c = variant((b) => { b.parts.battery = 'hyper84'; });
+    expect(c.mass).toBeGreaterThan(a.mass + 10);
+    expect(c.inertia.z).toBeGreaterThan(a.inertia.z);
+  });
+
+  it('stiffer springs reduce sag; more preload raises the bike', () => {
+    const soft = makeBike(variant((b) => { b.tuning.shockSpring = 0.7; }));
+    const stiff = makeBike(variant((b) => { b.tuning.shockSpring = 1.5; }));
+    settle(soft, 2);
+    settle(stiff, 2);
+    expect(stiff.rear.compression).toBeLessThan(soft.rear.compression);
+    const lo = makeBike(variant((b) => { b.tuning.shockPreload = 0; b.tuning.forkPreload = 0; }));
+    const hi = makeBike(variant((b) => { b.tuning.shockPreload = 25; b.tuning.forkPreload = 25; }));
+    settle(lo, 2);
+    settle(hi, 2);
+    expect(hi.pos.y).toBeGreaterThan(lo.pos.y);
+  });
+
+  it('a longer swingarm lengthens the wheelbase and widens the turning circle', () => {
+    const s = variant((b) => { b.parts.swingarm = 'short'; });
+    const l = variant((b) => { b.parts.swingarm = 'ext120'; });
+    expect(l.wheelbase).toBeGreaterThan(s.wheelbase + 0.1);
+    const ts = turnTest(s, 15, 1), tl = turnTest(l, 15, 1);
+    expect(tl.radius).toBeGreaterThan(ts.radius);
+  });
+
+  it('eco mode limits speed and power', () => {
+    const sp = stock();
+    const sport = accelTest(sp, 'asphalt', 16, 'sport');
+    const eco = accelTest(sp, 'asphalt', 16, 'eco');
+    expect(eco.topSpeed).toBeLessThan(sport.topSpeed * 0.85);
+    expect(eco.t0to50 ?? 99).toBeGreaterThan(sport.t0to50!);
+  });
+});

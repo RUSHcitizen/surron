@@ -99,7 +99,7 @@ export class Scorer {
     } else if (fG && rG && Math.abs(b.rear.slipAngle) > 0.2 && v > 3.5) {
       trick = 'drift';
       const ang = Math.min(1.2, Math.abs(b.rear.slipAngle));
-      rate = ang * 57 * (1 + v / 8) * 0.9;
+      rate = ang * 57 * (1 + v / 6) * 2.2;
     }
     // Landing resolution: an airborne phase scores once the bike lands cleanly.
     if (this.active === 'air' && trick !== 'air') {

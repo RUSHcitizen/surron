@@ -20,6 +20,7 @@ export class TouchControls {
     this.el = document.createElement('div');
     this.el.className = 'touch-ui';
     this.el.innerHTML = `
+      <div class="t-orbit" data-zone="orbit"></div>
       <div class="t-stick" data-zone="stick"><div class="t-stick-base"></div><div class="t-knob"></div><span class="t-hint">STEER · LEAN</span></div>
       <div class="t-right">
         <div class="t-btn t-rear" data-zone="rear">REAR<br><small>brake</small></div>
@@ -31,8 +32,7 @@ export class TouchControls {
         <button class="t-mini" data-action="reset" aria-label="Reset bike">⟲</button>
         <button class="t-mini" data-action="camera" aria-label="Camera">◉</button>
         <button class="t-mini" data-action="mode" aria-label="Ride mode">M</button>
-      </div>
-      <div class="t-orbit" data-zone="orbit"></div>`;
+      </div>`;
     parent.appendChild(this.el);
     this.knob = this.el.querySelector('.t-knob')!;
     this.stick = this.el.querySelector('.t-stick')!;

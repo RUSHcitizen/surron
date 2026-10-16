@@ -1,0 +1,4 @@
+# Cloudflare Pages configuration (static site, no Workers needed).
+name = "voltline"
+pages_build_output_dir = "dist"
+compatibility_date = "2025-01-01"

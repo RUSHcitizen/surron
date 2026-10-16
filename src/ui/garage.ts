@@ -675,9 +675,10 @@ export class Garage {
       s.data.builds.push(b);
     } else {
       const i = s.data.builds.findIndex((x) => x.id === b.id);
+      const perf = (x: BikeBuild) => JSON.stringify([x.parts, x.front, x.rear, x.tuning]);
+      // Measurements no longer describe a build whose performance parts changed (paint is fine).
+      if (perf(s.data.builds[i]) !== perf(b)) delete s.data.progress.measured[b.id];
       s.data.builds[i] = b;
-      // Measurements no longer describe a changed build.
-      delete s.data.progress.measured[b.id];
     }
     this.draft = cloneBuild(b);
     this.dirty = false;

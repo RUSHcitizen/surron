@@ -1,0 +1,52 @@
+// Mobile QA: iPhone-like landscape viewport with touch; multitouch via CDP.
+import { chromium, devices } from '@playwright/test';
+const url = process.argv[2] ?? 'http://localhost:5173/';
+const out = process.argv[3] ?? 'tools/shots/m';
+const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const ctx = await browser.newContext({ ...devices['iPhone 13 landscape'] });
+const page = await ctx.newPage();
+const logs = [];
+page.on('console', (m) => { if (m.type() !== 'debug') logs.push(`[${m.type()}] ${m.text()}`); });
+page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
+await page.goto(url);
+await page.waitForFunction(() => window.voltline, null, { timeout: 60000 });
+await page.waitForTimeout(1000);
+await page.screenshot({ path: `${out}-menu.png` });
+await page.tap('.btn.primary');
+await page.waitForTimeout(800);
+const box = async (sel) => page.locator(sel).boundingBox();
+const thr = await box('.t-throttle');
+const stick = await box('.t-stick');
+const cdp = await ctx.newCDPSession(page);
+const tp = (id, x, y) => ({ x, y, id, radiusX: 5, radiusY: 5, force: 1 });
+// Two simultaneous touches: throttle (upper part) + steer right.
+const T = tp(1, thr.x + thr.width / 2, thr.y + thr.height * 0.2);
+const S0 = tp(2, stick.x + stick.width / 2, stick.y + stick.height / 2);
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [T, S0] });
+await page.waitForTimeout(1500);
+const S1 = tp(2, S0.x + 45, S0.y);
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [T, S1] });
+await page.waitForTimeout(1200);
+const state = await page.evaluate(() => { const g = window.voltline; return { input: g.input.state, touch: g.input.touch, speed: g.bike.speed, lean: g.bike.lean, crashed: g.bike.crashed }; });
+logs.push('[state] ' + JSON.stringify(state));
+await page.screenshot({ path: `${out}-ride.png` });
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+await page.waitForTimeout(300);
+logs.push('[after release] ' + JSON.stringify(await page.evaluate(() => window.voltline.input.touch)));
+// Brake button + pause button
+const fb = await box('.t-front');
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [tp(3, fb.x + fb.width / 2, fb.y + fb.height / 2)] });
+await page.waitForTimeout(400);
+logs.push('[front brake] ' + JSON.stringify(await page.evaluate(() => window.voltline.input.state.frontBrake)));
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+await page.tap('[data-action="pause"]');
+await page.waitForTimeout(500);
+logs.push('[state after pause tap] ' + (await page.evaluate(() => window.voltline.state)));
+await page.screenshot({ path: `${out}-pause.png` });
+// Portrait hint
+await page.setViewportSize({ width: 390, height: 844 });
+await page.evaluate(() => window.voltline.setState('ride'));
+await page.waitForTimeout(500);
+await page.screenshot({ path: `${out}-portrait.png` });
+console.log(logs.join('\n'));
+await browser.close();
