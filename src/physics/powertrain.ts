@@ -136,6 +136,12 @@ export class Powertrain {
       this.tcActive = true;
       this.limiter = 'traction';
     }
+    // Hyper mode: always-on, smooth traction limiting (power far exceeds what the tyre holds).
+    if (m.grip > 1 && i.rearGrounded && i.speed > 0.5 && target > 0 && i.rearSlip > 0.07) {
+      target *= Math.max(0.35, 1 - (i.rearSlip - 0.07) * 5);
+      this.tcActive = true;
+      this.limiter = 'traction';
+    }
     // Wheelie control: limit pitch past ~24°.
     this.wcActive = false;
     if (sp.wheelieControl && !i.wheelieOverride && i.frontAirborne && i.rearGrounded && i.pitch > 0.36 && target > 0) {

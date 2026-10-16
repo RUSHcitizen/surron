@@ -21,7 +21,7 @@ import type { SurfaceId } from '../vehicle/parts';
 import type { CollisionWorld, Hit } from '../world/collision';
 import { makeHit } from '../world/collision';
 import { Powertrain } from './powertrain';
-import { SURFACE_PROPS, TUNING } from './tuning';
+import { RIDE_MODES, SURFACE_PROPS, TUNING } from './tuning';
 
 export interface BikeInput {
   throttle: number;
@@ -127,6 +127,21 @@ export class BikeDynamics {
 
   crashed = false;
   crashTime = 0;
+  /**
+   * 'arcade' (default): the only crashes are hitting something at 30+ mph and looping out a
+   * held wheelie; the rider never drops the bike by leaning, sliding or landing, and a bike that
+   * tips over is stood straight back up. 'realistic': the full crash model.
+   */
+  crashRule: 'arcade' | 'realistic' = 'arcade';
+  /** Speed at the start of the current step (impact speed for crash checks), m/s. */
+  private stepSpeed = 0;
+  /** Time spent tipped over / upside down while not crashed (arcade auto-right). */
+  private downTime = 0;
+  /** Trick-button pitch torque (about the bike's left axis, + = nose down). */
+  private trickTorque = 0;
+  /** Arcade auto-right in progress, and how many times it has happened (telemetry/tests). */
+  righting = false;
+  rightings = 0;
   crashCause = '';
   /** Simple rider ragdoll (point mass) used after a crash. */
   rider = { pos: tv(), vel: tv(), spin: tv(), rot: new Quaternion() };
@@ -273,6 +288,8 @@ export class BikeDynamics {
     if (_hf.lengthSq() < 1e-4) _hf.set(_up.x, 0, _up.z);
     _hf.normalize();
     this.speed = this.vel.dot(_fwd);
+    this.stepSpeed = this.vel.length();
+    const arcade = this.crashRule === 'arcade';
     this.lean = Math.asin(clamp(_left.dot(UP), -1, 1));
     this.pitch = Math.asin(clamp(_fwd.dot(UP), -1, 1));
     const leanRate = this.angVel.dot(_fwd);
@@ -300,9 +317,20 @@ export class BikeDynamics {
     this.wheelieHold = wheelieBtn ? this.wheelieHold + dt : 0;
     this.stoppieHold = stoppieBtn ? this.stoppieHold + dt : 0;
     const TR = TUNING.tricks;
+    this.trickTorque = 0;
+    // Pitch torque scale: about what it takes to hold this bike + rider at a given pitch.
+    const liftScale = (m * g * 0.55) / 0.5;
     if (wheelieBtn) {
       const target = TR.wheelieBase + Math.max(0, this.wheelieHold - TR.holdGrace) * TR.wheelieRamp;
       const rateUp = -this.angVel.dot(_left);
+      // At speed the motor alone cannot pull the front up (no clutch to dump), so the rider
+      // pops it with body weight and holds the balance point: a pitch torque toward the
+      // target, strongest at speed and fading at a standstill where the motor torque does it.
+      if (this.rear.grounded) {
+        const pop = smoothstep(2, 9, av);
+        const tq = clamp((target - this.pitch) * TR.liftStiffness - rateUp * TR.liftDamping, -1.2, 1.6) * liftScale * pop;
+        this.trickTorque = -tq;
+      }
       leanIn = -1;
       fb = 0;
       rb = 0;
@@ -322,7 +350,15 @@ export class BikeDynamics {
       thr = 0;
       rb = 0;
       fb = this.front.grounded ? clamp(0.7 + (target - nose) * 3 - noseRate * 0.8, 0.1, 0.95) : 0;
-      if (this.front.grounded && nose > TR.overBars) this.crash('over the bars');
+      if (this.front.grounded && av > 1.5) {
+        // Weight over the bars helps the rear up at speed; in arcade it never goes past the
+        // balance point.
+        const tgt = arcade ? Math.min(target, TR.overBars - 0.3) : target;
+        const tq = clamp((tgt - nose) * TR.liftStiffness * 0.7 - noseRate * TR.liftDamping, -1.2, 1.2) * liftScale * 0.6 * smoothstep(1.5, 6, av);
+        this.trickTorque = tq;
+        if (arcade && nose > tgt) fb *= clamp(1 - (nose - tgt) * 6, 0, 1);
+      }
+      if (!arcade && this.front.grounded && nose > TR.overBars) this.crash('over the bars');
     }
 
     // --- Rider instinct: ease the front brake at the stoppie point and the throttle at the
@@ -370,6 +406,11 @@ export class BikeDynamics {
         thr *= clamp(1 - (this.rear.slide - 0.35) * 2.5 * this.assist * smoothstep(0.45, 0.8, leanAbs), 0.1, 1);
       }
     }
+    // Arcade: at speed and deep in a lean the rider feeds the throttle in gently, so the rear
+    // never steps out and snaps back (no highsides from full throttle at full lean).
+    if (arcade && !wheelieBtn && this.rear.grounded) {
+      thr *= 1 - 0.75 * smoothstep(0.3, 0.7, Math.abs(this.lean)) * smoothstep(12, 35, av);
+    }
     this.effFrontBrake = fb;
     this.effThrottle = thr;
 
@@ -397,7 +438,9 @@ export class BikeDynamics {
     const gain = (sp.steering.leverage / (1 + av / 14)) * (1.15 - 0.15 * trailF);
     // Target a roll rate toward the desired lean (rate-limited like a real rider's flick),
     // and steer to produce it: this is countersteering.
-    const maxRate = T.maxRollRate * sp.steering.leverage;
+    // Arcade: at very high speed the flick from one side to the other is calmer, so a
+    // full-lock change of direction cannot snap the rear and throw the bike (a highside).
+    const maxRate = T.maxRollRate * sp.steering.leverage * (arcade ? lerp(1, 0.4, smoothstep(22, 55, av)) : 1);
     const rateT = clamp((leanT - this.lean) * T.leanGain, -maxRate, maxRate);
     const dFb = T.kd * (leanRate - rateT) * gain;
     const dDirect = dDirectBase + dFb * 0.3;
@@ -476,7 +519,7 @@ export class BikeDynamics {
     // --- Aero ---------------------------------------------------------------
     const vmag = this.vel.length();
     if (vmag > 0.1) {
-      _tmp.copy(this.vel).multiplyScalar(-0.5 * TUNING.airDensity * sp.cda * vmag);
+      _tmp.copy(this.vel).multiplyScalar(-0.5 * TUNING.airDensity * sp.cda * RIDE_MODES[this.pt.mode].aero * vmag);
       force.add(_tmp);
     }
 
@@ -495,19 +538,29 @@ export class BikeDynamics {
         // Save: when the bike falls past the lean the rider can hold (tucking the front, a dab of
         // the knee or foot), the rider fights it back up. Strength scales with assist; at 0 assist
         // nothing catches you.
-        const holdLean = this.maxLeanNow + 0.08;
+        // In arcade the rider always saves it, however hard the turn.
+        const save = arcade ? Math.max(1, this.assist * 1.5) : this.assist;
+        const holdLean = this.maxLeanNow + (arcade ? 0.02 : 0.08);
         const over = Math.abs(this.lean) - holdLean;
-        if (over > 0 && this.assist > 0) {
-          const kc = A.catchStiffness * this.assist * (1 + over * 6);
+        if (over > 0 && save > 0) {
+          const kc = A.catchStiffness * save * (1 + over * 6);
           const falling = Math.sign(this.lean) * leanRate > 0 ? leanRate : 0;
-          _tmp.copy(_hf).multiplyScalar(-Math.sign(this.lean) * kc * over - A.catchDamping * this.assist * falling);
+          _tmp.copy(_hf).multiplyScalar(-Math.sign(this.lean) * kc * over - A.catchDamping * save * falling);
           torque.add(_tmp);
         }
+        if (this.trickTorque) torque.addScaledVector(_left, this.trickTorque);
         // Slide control: past ~20° of rear slip the rider's body-English and feel resist further
         // rotation, which makes drifts catchable. Below that, grip riding is untouched.
         const slideW = smoothstep(0.22, 0.75, Math.abs(this.rear.slipAngle)) * smoothstep(1.5, 5, av);
         if (slideW > 0) {
           _tmp.copy(UP).multiplyScalar(-A.slideYawDamping * (0.25 + this.assist) * slideW * this.yawRate);
+          torque.add(_tmp);
+        }
+        // Arcade stability at speed: the rear is pulled back in line with the direction of
+        // travel, so a rear that steps out at 100+ km/h settles instead of snapping (highside).
+        if (arcade && this.rear.grounded && av > 18) {
+          const w = smoothstep(18, 35, av);
+          _tmp.copy(UP).multiplyScalar(A.arcadeYawStiffness * m * w * clamp(this.rear.slipAngle, -0.5, 0.5) - A.yawDamping * w * this.yawRate * 0.6);
           torque.add(_tmp);
         }
         // Yaw damping (assist) tames snap slides without killing them.
@@ -588,10 +641,11 @@ export class BikeDynamics {
       this.airRot.set(0, 0, 0);
       this.maxImpact = 0;
     }
-    if (!this.crashed) {
+    if (!this.crashed && !arcade) {
       if (grounded && Math.abs(this.lean) > TUNING.crash.lean && av < 25) this.crash('lowside');
       else if (grounded && upright < -0.2) this.crash('upside-down');
     }
+    if (!this.crashed && arcade) this.autoRight(dt, upright);
     if (this.crashed) {
       this.crashTime += dt;
       this.stepRider(dt);
@@ -700,7 +754,7 @@ export class BikeDynamics {
       F += TS.bumpStop * pen + TS.bumpDamping * Math.max(0, pdot);
       const impact = Math.max(0, pdot);
       this.maxImpact = Math.max(this.maxImpact, impact + xdot);
-      if (!this.crashed && pdot + xdot > TUNING.crash.landing * this.spec.toughness) this.crash('hard landing');
+      if (!this.crashed && this.crashRule === 'realistic' && pdot + xdot > TUNING.crash.landing * this.spec.toughness) this.crash('hard landing');
       if (pdot > 1.2) this.events.push({ type: 'bump', strength: Math.min(1, pdot / 6), wheel: which });
     }
     this.prevPen[which] = Math.max(0, pen);
@@ -737,7 +791,7 @@ export class BikeDynamics {
     const vLat = _vc.dot(_l);
     const tire = w.tire;
     const surf = SURFACE_PROPS[bestSurface];
-    const mu = tire.mu[bestSurface];
+    const mu = tire.mu[bestSurface] * RIDE_MODES[this.pt.mode].grip;
     const stiff = tire.stiffness[bestSurface];
     const slideR = tire.slideRatio;
     const peakSlip = tire.peakSlip / Math.sqrt(stiff);
@@ -832,7 +886,12 @@ export class BikeDynamics {
       touching = true;
       // A rider-body contact is a crash when it is a real impact (or the bike is lying down).
       // Gentle touches (a bar end brushing a bank, a slow tip at walking pace) are a dab.
-      if (crashProbe && depth > 0.012) {
+      if (this.crashRule === 'arcade') {
+        // Arcade: only a real hit into something (a wall, tree, pole: a steep surface) at 30+ mph.
+        // The ground, ramps and glancing scrapes along a wall never crash.
+        const C = TUNING.crash;
+        if (n.y < 0.55 && this.stepSpeed >= C.arcadeSpeed && -vn >= Math.max(C.arcadeImpact, this.stepSpeed * 0.35)) crashHit = name;
+      } else if (crashProbe && depth > 0.012) {
         // Head-on speed into the surface counts fully; sliding along it (a bar end scraping a
         // wall) much less.
         const impact = Math.max(-vn, vt * 0.2);
@@ -841,7 +900,7 @@ export class BikeDynamics {
         if (lying || impact > limit || depth > 0.12) crashHit = name;
       }
       // Front/rear tyre straight into a wall: a crash only above a speed that grows with assist.
-      if (!crashProbe && -vn > lerp(7, 11, this.assist) * sp.toughness && name.startsWith('tire')) crashHit = name;
+      if (this.crashRule === 'realistic' && !crashProbe && -vn > lerp(7, 11, this.assist) * sp.toughness && name.startsWith('tire')) crashHit = name;
       if (!crashProbe) scrape = Math.max(scrape, vt);
     };
     for (const bp of sp.bodyPoints) {
@@ -858,6 +917,40 @@ export class BikeDynamics {
     if (scrape > 1 && touching) this.events.push({ type: 'scrape', strength: Math.min(1, scrape / 10) });
     this.bodyContact = touching ? this.bodyContact + dt : 0;
     if (crashHit && !this.crashed) this.crash(crashHit);
+  }
+
+  /**
+   * Arcade: a bike that ends up on its side or upside down (a slow tip, a wall bounce, a bad
+   * landing) is stood back up within a moment instead of crashing.
+   */
+  private autoRight(dt: number, upright: number) {
+    const touching = this.front.grounded || this.rear.grounded || this.bodyContact > 0;
+    // Leaned past what the rider can hold (the tyres let go mid-turn): the rider catches it,
+    // stepping the lean back to the limit instead of letting the bike lie down.
+    const excess = Math.abs(this.lean) - (this.maxLeanNow + 0.12);
+    if (touching && excess > 0 && upright > 0.2) {
+      _q.setFromAxisAngle(_fwd, -Math.sign(this.lean) * Math.min(excess, 2.5 * dt));
+      this.quat.premultiply(_q).normalize();
+      const lr = this.angVel.dot(_fwd);
+      if (Math.sign(lr) === Math.sign(this.lean)) this.angVel.addScaledVector(_fwd, -lr * Math.min(1, 20 * dt));
+    }
+    const down = touching && (Math.abs(this.lean) > Math.max(1.05, this.maxLeanNow + 0.3) || upright < 0.45);
+    this.downTime = down ? this.downTime + dt : Math.max(0, this.downTime - dt * 2);
+    if (this.downTime < 0.3) return;
+    if (!this.righting) this.rightings++;
+    this.righting = true;
+    _q.setFromAxisAngle(UP, this.yaw);
+    this.quat.slerp(_q, Math.min(1, 7 * dt)).normalize();
+    this.angVel.multiplyScalar(Math.max(0, 1 - 12 * dt));
+    // Ease off sideways momentum and lift clear of the ground while righting.
+    this.vel.x *= 1 - 2 * dt;
+    this.vel.z *= 1 - 2 * dt;
+    const clearance = this.world.heightAt(this.pos.x, this.pos.z) + this.rideHeight() * 0.9;
+    if (this.pos.y < clearance) this.pos.y += Math.min(clearance - this.pos.y, 3 * dt);
+    if (upright > 0.97 && Math.abs(this.lean) < 0.15) {
+      this.downTime = 0;
+      this.righting = false;
+    }
   }
 
   crash(cause: string) {

@@ -41,7 +41,7 @@ export const TUNING = {
     /** Angular damping (N·m·s/rad) to keep tumbling sane. */
     angularDrag: 1.2,
     maxAngularSpeed: 18,
-    maxSpeed: 70,
+    maxSpeed: 95,
   },
 
   steering: {
@@ -86,7 +86,9 @@ export const TUNING = {
     slideYawDamping: 180,
     /** Roll support from the rider's foot in big slides (scaled by assist). */
     /** Lean "save": torque that stands the bike up once it leans past what the rider can hold. */
-    catchStiffness: 1400,
+/** Arcade: yaw torque per kg per rad of rear slip at speed. */
+    arcadeYawStiffness: 15,
+        catchStiffness: 1400,
     catchDamping: 260,
     slideRollStiffness: 900,
     slideRollDamping: 160,
@@ -133,6 +135,9 @@ export const TUNING = {
     stoppieRamp: 0.22,
     /** Nose-down pitch at which a held stoppie goes over the bars. */
     overBars: 0.95,
+    /** Pitch controller used by the buttons to pop and hold the front (or rear) at speed. */
+    liftStiffness: 2.2,
+    liftDamping: 0.7,
   },
   crash: {
     /** Lean angle (rad) past which a grounded bike is considered down. */
@@ -142,6 +147,9 @@ export const TUNING = {
     /** Hard landing that bottoms the suspension faster than this crashes (m/s). */
     landing: 10.5,
     autoReset: 3.2,
+    /** Arcade crash rule: minimum speed (30 mph) and head-on impact speed into a wall, m/s. */
+    arcadeSpeed: 13.4,
+    arcadeImpact: 5.5,
   },
 };
 
@@ -169,7 +177,13 @@ export const SURFACE_PROPS: Record<SurfaceId, SurfaceProps> = {
 };
 
 export const RIDE_MODES = {
-  eco: { label: 'ECO', torque: 0.6, power: 0.45, speed: 0.7, regen: 1.25 },
-  standard: { label: 'STD', torque: 0.85, power: 0.75, speed: 1.0, regen: 1.0 },
-  sport: { label: 'SPORT', torque: 1.0, power: 1.0, speed: 1.0, regen: 0.8 },
+  eco: { label: 'ECO', torque: 0.6, power: 0.45, speed: 0.7, regen: 1.25, aero: 1, grip: 1 },
+  standard: { label: 'STD', torque: 0.85, power: 0.75, speed: 1.0, regen: 1.0, aero: 1, grip: 1 },
+  sport: { label: 'SPORT', torque: 1.0, power: 1.0, speed: 1.0, regen: 0.8, aero: 1, grip: 1 },
+  /**
+   * Unlocked controller and motor speed, far beyond the stock bike, for going very fast: the
+   * rider tucks (less drag), and a launch-grade traction controller feeds in only the power the
+   * rear tyre can put down.
+   */
+  hyper: { label: 'HYPER', torque: 1.2, power: 6, speed: 3.2, regen: 0.8, aero: 0.5, grip: 1.15 },
 } as const;

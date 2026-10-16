@@ -5,7 +5,7 @@ import {
 } from './parts';
 import type { DecalId, FinishId, HelmetStyle } from './parts';
 
-export type RideMode = 'eco' | 'standard' | 'sport';
+export type RideMode = 'eco' | 'standard' | 'sport' | 'hyper';
 export type ThrottleMap = 'soft' | 'linear' | 'aggressive';
 
 export interface TireConfig {

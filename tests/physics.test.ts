@@ -16,6 +16,7 @@ const stock = () => computeVehicleSpec(defaultBuild());
 const preset = (id: string) => PRESETS.find((p) => p.id === id)!;
 const cruise = (target: number) => (b: BikeDynamics) => Math.max(0, Math.min(1, (target - b.speed) * 0.6 + 0.12));
 const deg = (r: number) => (r * 180) / Math.PI;
+const wallBox = (x: number, z: number) => ({ x, y: 2, z, sx: 30, sy: 4, sz: 1, surface: 'concrete' as const });
 
 describe('static behaviour', () => {
   it('settles upright with sensible sag and no drift', () => {
@@ -113,6 +114,7 @@ describe('cornering', () => {
     const spec = stock();
     const bike = makeBike(spec);
     bike.assist = 0;
+    bike.crashRule = 'realistic';
     settle(bike);
     run(bike, 20, (_t, b) => ({ ...emptyInput(), throttle: cruise(17)(b) }), (_t, b) => b.speed >= 17);
     run(bike, 6, () => ({ ...emptyInput(), throttle: 1, steer: 1 }), (_t, b) => b.crashed);
@@ -353,5 +355,52 @@ describe('forgiving for casual phone riding', () => {
     }
     // 160 s of deliberately jabby riding across four bikes and surfaces.
     expect(crashes).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('arcade crash rule (default)', () => {
+  it('full-lock turning at any speed never crashes or lies the bike down', () => {
+    for (const p of PRESETS) {
+      const bike = makeBike(computeVehicleSpec(p), flatWorld(20000, 'asphalt'), 'hyper');
+      settle(bike, 1);
+      run(bike, 25, (_t, b) => ({ ...emptyInput(), throttle: launchThrottle(b), lean: 1 }));
+      let maxLean = 0;
+      run(bike, 10, (t) => ({ ...emptyInput(), throttle: 1, steer: Math.sin(t * 1.3) > 0 ? 1 : -1 }), (_t, b) => { maxLean = Math.max(maxLean, Math.abs(b.lean)); });
+      expect(bike.crashed, p.id).toBe(false);
+      expect(maxLean, p.id).toBeLessThan(1.0);
+    }
+  });
+
+  it('hyper mode goes very fast (well past 150 km/h on the supermoto)', () => {
+    const sm = PRESETS.find((p) => p.id === 'hornet')!;
+    expect(accelTest(computeVehicleSpec(sm), 'asphalt', 40, 'hyper').topSpeed * 3.6).toBeGreaterThan(180);
+  });
+
+  it('a wall hit below 30 mph is not a crash; above 30 mph head-on it is', () => {
+    for (const [v, crash] of [[9, false], [18, true]] as const) {
+      const world = flatWorld(400);
+      world.addBox(wallBox(0, 120));
+      const bike = makeBike(stock(), world);
+      settle(bike);
+      let atHit = 0;
+      run(bike, 30, (_t, b) => ({ ...emptyInput(), throttle: cruise(v)(b) }), (_t, b) => {
+        if (b.pos.z < 117) atHit = b.speed;
+        return b.crashed || b.pos.z > 125;
+      });
+      expect(Math.abs(atHit - v), 'reached test speed').toBeLessThan(1.5);
+      expect(bike.crashed, `at ${v} m/s`).toBe(crash);
+    }
+  });
+
+  it('the wheelie button pulls a clear wheelie at 50 km/h too (not just from a standstill)', () => {
+    for (const p of PRESETS) {
+      const bike = makeBike(computeVehicleSpec(p), flatWorld(4000));
+      settle(bike);
+      run(bike, 20, (_t, b) => ({ ...emptyInput(), throttle: cruise(14)(b) }), (_t, b) => b.speed >= 13.8);
+      let maxP = 0;
+      run(bike, 1.5, () => ({ ...emptyInput(), wheelie: 1 }), (_t, b) => { maxP = Math.max(maxP, b.pitch); });
+      expect(maxP, p.id).toBeGreaterThan(0.3);
+      expect(bike.crashed, p.id).toBe(false);
+    }
   });
 });

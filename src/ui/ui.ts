@@ -206,10 +206,12 @@ export class UI {
       tabs.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', (x as HTMLElement).dataset.t === t));
       if (t === 'gameplay') {
         body.append(
+          segmented('Crashes', [{ id: 'arcade', name: 'Big hits only' }, { id: 'realistic', name: 'Realistic' }] as const, s.crashes, (v) => set('crashes', v)),
+          h('div', { class: 'note' }, 'Big hits only: you crash only when you hit something at 30+ mph (or loop out a held wheelie). Leaning, sliding and landings never throw you off, and a tipped bike stands back up. Realistic: lowsides, endos and hard landings count.'),
           slider('Rider assist', s.assist, 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`, (v) => set('assist', v)),
           h('div', { class: 'note' }, 'Assist = balance help, lean margin, and rider instincts (easing brake/throttle at the stoppie, loop-out and slide limits). 0% is raw physics: lowsides, loop-outs and endos are on you.'),
           slider('Steering sensitivity', s.steerSensitivity, 0.4, 2, 0.05, (v) => v.toFixed(2), (v) => set('steerSensitivity', v)),
-          segmented('Default ride mode', [{ id: 'eco', name: 'Eco' }, { id: 'standard', name: 'Standard' }, { id: 'sport', name: 'Sport' }] as const, s.rideMode, (v) => set('rideMode', v)),
+          segmented('Default ride mode', [{ id: 'eco', name: 'Eco' }, { id: 'standard', name: 'Standard' }, { id: 'sport', name: 'Sport' }, { id: 'hyper', name: 'Hyper' }] as const, s.rideMode, (v) => set('rideMode', v)),
           segmented('Battery drain', [{ id: 'realistic', name: 'Realistic' }, { id: 'relaxed', name: 'Relaxed ×¼' }, { id: 'off', name: 'Off' }] as const, s.drain, (v) => set('drain', v)),
           segmented('Units', [{ id: 'kmh', name: 'km/h' }, { id: 'mph', name: 'mph' }] as const, s.units, (v) => set('units', v)),
           segmented('Time of day', [{ id: 'day', name: 'Day' }, { id: 'sunset', name: 'Sunset' }, { id: 'night', name: 'Night' }] as const, s.timeOfDay, (v) => set('timeOfDay', v)),

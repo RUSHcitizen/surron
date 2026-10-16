@@ -17,6 +17,7 @@ function play(presetIdx: number, surface: SurfaceId | 'world', seed: number, sec
     for (const b of d.boxes) world.addBox(b);
   } else world = flatWorld(4000, surface);
   const bike = makeBike(computeVehicleSpec(PRESETS[presetIdx]), world, (process.env.RIDEMODE ?? 'sport') as 'sport');
+  bike.crashRule = (process.env.RULE ?? 'arcade') as 'arcade';
   bike.assist = assist;
   if (surface === 'world') {
     const sp = (process.env.SPAWN ?? '110,0,1.5708').split(',').map(Number);
@@ -46,7 +47,7 @@ function play(presetIdx: number, surface: SurfaceId | 'world', seed: number, sec
     bike.events.length = 0;
     if (bike.wantsReset) bike.reset();
   }
-  return { crashes, causes, maxV };
+  return { crashes, causes, maxV, rightings: bike.rightings };
 }
 
 it('phone-player crash rate', () => {
@@ -56,7 +57,7 @@ it('phone-player crash rate', () => {
   for (const surf of surfaces) for (let p = 0; p < PRESETS.length; p++) {
     const r = play(p, surf, 11 + p, 60, assist);
     total += r.crashes;
-    console.log(surf.padEnd(8), PRESETS[p].id.padEnd(8), 'crashes/min', r.crashes, 'maxV', r.maxV.toFixed(1), r.causes.slice(0, 4).join(' | '));
+    process.stdout.write(['\n', surf.padEnd(8), PRESETS[p].id.padEnd(8), 'crashes', r.crashes, 'maxV', r.maxV.toFixed(1), 'rightings', r.rightings, r.causes.slice(0, 4).join(' | ')].join(' '));
   }
-  console.log('TOTAL', total);
+  process.stdout.write('\nTOTAL ' + total + '\n');
 });

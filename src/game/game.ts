@@ -243,6 +243,7 @@ export class Game {
     (this.scene.fog as Fog).far = this.quality.drawDistance;
     (this.scene.fog as Fog).near = this.quality.drawDistance * 0.25;
     this.bike.assist = s.assist;
+    this.bike.crashRule = s.crashes;
     this.bike.pt.drain = s.drain;
     this.bike.pt.mode = s.rideMode;
     this.cam.distance = s.camDistance;
@@ -500,8 +501,8 @@ export class Game {
       this.ui.toast(`Camera: ${this.cam.mode}`);
     }
     if (inp.consume('mode')) {
-      const modes: RideMode[] = ['eco', 'standard', 'sport'];
-      const m = modes[(modes.indexOf(this.bike.pt.mode) + 1) % 3];
+      const modes: RideMode[] = ['eco', 'standard', 'sport', 'hyper'];
+      const m = modes[(modes.indexOf(this.bike.pt.mode) + 1) % modes.length];
       this.bike.pt.mode = m;
       this.settings.rideMode = m;
       this.save.save();
