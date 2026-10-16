@@ -179,7 +179,7 @@ export const SURFACE_PROPS: Record<SurfaceId, SurfaceProps> = {
 export const RIDE_MODES = {
   eco: { label: 'ECO', torque: 0.6, power: 0.45, speed: 0.7, regen: 1.25, aero: 1, grip: 1 },
   standard: { label: 'STD', torque: 0.85, power: 0.75, speed: 1.0, regen: 1.0, aero: 1, grip: 1 },
-  sport: { label: 'SPORT', torque: 1.0, power: 1.0, speed: 1.0, regen: 0.8, aero: 1, grip: 1 },
+  sport: { label: 'SPORT', torque: 1.25, power: 1.7, speed: 1.3, regen: 0.8, aero: 0.85, grip: 1 },
   /**
    * Unlocked controller and motor speed, far beyond the stock bike, for going very fast: the
    * rider tucks (less drag), and a launch-grade traction controller feeds in only the power the

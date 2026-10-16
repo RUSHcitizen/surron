@@ -139,6 +139,8 @@ export class BikeDynamics {
   private downTime = 0;
   /** Trick-button pitch torque (about the bike's left axis, + = nose down). */
   private trickTorque = 0;
+  /** Smoothed instinctive throttle roll-off (1 = none). */
+  private thrTrim = 1;
   /** Arcade auto-right in progress, and how many times it has happened (telemetry/tests). */
   righting = false;
   rightings = 0;
@@ -240,6 +242,7 @@ export class BikeDynamics {
     this.airTime = 0;
     this.airRot.set(0, 0, 0);
     this.pt.reset();
+    this.thrTrim = 1;
     this.prevPos.copy(this.pos);
     this.prevQuat.copy(this.quat);
     this.safe.length = 0;
@@ -361,9 +364,27 @@ export class BikeDynamics {
       if (!arcade && this.front.grounded && nose > TR.overBars) this.crash('over the bars');
     }
 
+    // Throttle as asked for, before the rider's instinctive roll-offs below (they are
+    // smoothed against it at the end so the drive never chatters on and off).
+    const thrAsked = thr;
+
     // --- Rider instinct: ease the front brake at the stoppie point and the throttle at the
     // loop-out point, the way a rider modulates by feel. Scaled by assist (0 = none).
     if (!this.crashed && this.assist > 0) {
+      // Accelerating hard without asking for a wheelie (button or leaning back), the rider
+      // tucks over the bars and holds the front down with body weight. Full throttle then
+      // means full drive, not an accidental wheelie the throttle has to be chopped to stop.
+      if (!wheelieBtn && !stoppieBtn && leanIn > -0.3 && this.rear.grounded && thr > 0.05) {
+        const prUp = -this.angVel.dot(_left);
+        const loadF = this.front.load / (sp.mass * g * 0.45);
+        const frontLight = this.front.grounded ? smoothstep(0.35, 0.05, loadF) : 1;
+        const rise = Math.max(0, this.pitch) + Math.max(0, prUp) * 0.15;
+        leanIn = clamp(Math.max(leanIn, thr * 0.4 * this.assist + frontLight), -1, 1);
+        if (frontLight > 0) {
+          const hold = clamp(0.3 + rise * 3 + Math.max(0, prUp) * 0.6, 0, 1.5) * frontLight * thr;
+          this.trickTorque += hold * liftScale * this.assist * (arcade ? 1 : 0.6) * smoothstep(0.3, 2, av);
+        }
+      }
       const R = TUNING.rider;
       // Predict where the pitch is heading (rate look-ahead) so the rider eases off *before*
       // the bike goes over the bars, holding it near the stoppie balance point.
@@ -411,6 +432,13 @@ export class BikeDynamics {
     if (arcade && !wheelieBtn && this.rear.grounded) {
       thr *= 1 - 0.75 * smoothstep(0.3, 0.7, Math.abs(this.lean)) * smoothstep(12, 35, av);
     }
+    // The rider's hand moves at human speed: roll-offs come in quickly and the throttle is fed
+    // back in smoothly, instead of the drive switching on and off with every correction.
+    if (!wheelieBtn && thrAsked > 0.02) {
+      const k = clamp(thr / thrAsked, 0, 1);
+      this.thrTrim += clamp(k - this.thrTrim, -10 * dt, 3.5 * dt);
+      thr = thrAsked * Math.min(this.thrTrim, k + 0.25);
+    } else this.thrTrim = 1;
     this.effFrontBrake = fb;
     this.effThrottle = thr;
 
@@ -486,6 +514,8 @@ export class BikeDynamics {
       wheelOmega: this.rear.omega,
       rearSlip: this.rear.slipRatio,
       wheelieOverride: wheelieBtn,
+      launch: this.crashed || wheelieBtn ? 0
+        : this.assist * (1 - smoothstep(0.15, 0.45, Math.max(Math.abs(steerIn), Math.abs(this.lean) * 2))),
       pitch: this.pitch,
       frontAirborne: !this.front.grounded,
       rearGrounded: this.rear.grounded,

@@ -100,6 +100,9 @@ The service worker is only registered in production builds (`npm run build && np
   * Battery voltage sag and state of charge.
   * Coast and brake regen.
   * Motor thermal model with derating.
+  * Smooth, strong drive: at full throttle (with rider assist) the rider keeps the front down instead of popping an
+    accidental wheelie, a straight-line launch control holds the rear tyre near peak grip, and the rider's instinctive
+    roll-offs are fed back in smoothly rather than switching the drive on and off.
   * Throttle maps, Eco/Standard/Sport/Hyper modes, traction control and wheelie control. Hyper unlocks the controller and
     motor speed, tucks the rider (less drag) and adds launch-grade traction control.
 * **Customization that changes the physics**. Every part feeds `computeVehicleSpec`, and the same spec drives both the
@@ -187,7 +190,7 @@ npm run deploy        # = npm run build && npx wrangler deploy
 
 ## Tests
 
-* `npm test`: 53 Vitest tests.
+* `npm test`: 54 Vitest tests.
   * Physics scenarios:
     * settling and sag; acceleration and top speed; braking for every preset without flipping
     * turn equilibrium vs. tanφ = v²/(gR); right-steer → right-lean; low-speed U-turn; slaloms at 3 speeds
@@ -195,6 +198,7 @@ npm run deploy        # = npm run build && npx wrangler deploy
     * kicker jump landing; curb climbing; 40 s random-input fuzz (no NaN); crash/reset recovery
     * trick buttons: a short wheelie hold lifts the front safely, holding too long loops out, the stoppie button lifts the rear,
       and the wheelie button works at 50 km/h on every preset
+    * holding full throttle drives every preset forward cleanly: no accidental wheelie, no on/off throttle chatter
     * arcade crash rule: full-lock turning at any speed never crashes or lays the bike down; a wall hit below 30 mph is not a
       crash, above 30 mph head-on it is; Hyper mode passes 180 km/h
     * the rider mesh builds quickly at a sane size

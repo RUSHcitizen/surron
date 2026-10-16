@@ -56,7 +56,7 @@ instead of exploding it.
 ## Tuning workflow
 
 1. Change constants in `src/physics/tuning.ts` (or part values in `src/vehicle/parts.ts`).
-2. Run `npm run lab`. For a specific sweep: `SCEN=turn,slalom,drift,wheelie,uturn,presets npm run lab`.
+2. Run `npm run lab`. Ride feel (launch times, throttle chatter, pitch) per preset: `RIDEMODE=sport npx vitest run --config tools/vitest.lab.config.ts tools/lab-feel.test.ts`. For a specific sweep: `SCEN=turn,slalom,drift,wheelie,uturn,presets npm run lab`.
    For a single trace: `V=16.7 DUR=6 npx vitest run --config tools/vitest.lab.config.ts tools/lab-trace.test.ts --reporter=verbose`.
 3. Run `npm test` to confirm the regression scenarios still pass.
 
@@ -78,7 +78,7 @@ instead of exploding it.
 - [x] IndexedDB saves (versioned, migration, corruption-safe, fallbacks).
 - [x] PWA: manifest, icons, generated precaching service worker, offline fallback, cache versioning.
 - [x] Cloudflare Pages config (`_headers`, `wrangler.toml`, docs).
-- [x] 53 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] 54 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
 - [x] Round 4: skinned SDF rider (man in MX gear, sculpted helmets), arcade crash rule (only 30+ mph impacts or a
       looped-out wheelie; auto-righting), Hyper ride mode (up to ~230 km/h) with high-speed stability aids, wheelie/stoppie
       buttons that work at speed, spring-damped camera with a three-quarter trick view, post-processing (bloom, speed blur,

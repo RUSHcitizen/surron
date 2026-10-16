@@ -41,13 +41,13 @@ describe('static behaviour', () => {
 });
 
 describe('acceleration, top speed and braking', () => {
-  it('stock bike: realistic 0-50 and top speed', () => {
+  it('stock bike: punchy but believable 0-50 and top speed (Sport)', () => {
     const r = accelTest(stock());
     expect(r.crashed).toBe(false);
-    expect(r.t0to50!).toBeGreaterThan(2.5);
-    expect(r.t0to50!).toBeLessThan(5.5);
-    expect(r.topSpeed * 3.6).toBeGreaterThan(65);
-    expect(r.topSpeed * 3.6).toBeLessThan(90);
+    expect(r.t0to50!).toBeGreaterThan(1.8);
+    expect(r.t0to50!).toBeLessThan(3.2);
+    expect(r.topSpeed * 3.6).toBeGreaterThan(80);
+    expect(r.topSpeed * 3.6).toBeLessThan(110);
   });
 
   it('a more powerful build accelerates harder', () => {
@@ -382,13 +382,32 @@ describe('arcade crash rule (default)', () => {
       world.addBox(wallBox(0, 120));
       const bike = makeBike(stock(), world);
       settle(bike);
-      let atHit = 0;
+      let atHit = 0, reached = false;
       run(bike, 30, (_t, b) => ({ ...emptyInput(), throttle: cruise(v)(b) }), (_t, b) => {
-        if (b.pos.z < 117) atHit = b.speed;
+        // Speed on the way in (not after bouncing back off the wall).
+        if (b.pos.z >= 117) reached = true;
+        if (!reached) atHit = b.speed;
         return b.crashed || b.pos.z > 125;
       });
       expect(Math.abs(atHit - v), 'reached test speed').toBeLessThan(1.5);
       expect(bike.crashed, `at ${v} m/s`).toBe(crash);
+    }
+  });
+
+  it('holding full throttle (no lean) drives forward cleanly: no accidental wheelie, no throttle chatter', () => {
+    for (const p of PRESETS) {
+      const bike = makeBike(computeVehicleSpec(p), flatWorld(4000));
+      settle(bike);
+      let thr = 0, maxP = 0, chatter = 0, prev = 0;
+      run(bike, 5, () => ({ ...emptyInput(), throttle: (thr = Math.min(1, thr + 5 / 240)) }), (t, b) => {
+        maxP = Math.max(maxP, b.pitch);
+        if (t > 0.5) chatter += Math.abs(b.effThrottle - prev);
+        prev = b.effThrottle;
+      });
+      expect(maxP, p.id).toBeLessThan(0.25);
+      expect(bike.speed * 3.6, p.id).toBeGreaterThan(50);
+      expect(chatter, p.id).toBeLessThan(5);
+      expect(bike.crashed, p.id).toBe(false);
     }
   });
 

@@ -21,6 +21,8 @@ export interface PowertrainInput {
   rearGrounded: boolean;
   speed: number;
   dt: number;
+  /** 0..1: rider-assist launch traction (riding straight); trims torque to what the tyre holds. */
+  launch?: number;
   /** Rider is deliberately wheelieing (trick button): wheelie control stays out of it. */
   wheelieOverride?: boolean;
 }
@@ -131,8 +133,8 @@ export class Powertrain {
 
     // Traction control: trim torque when the rear spins up.
     this.tcActive = false;
-    if (sp.tractionControl && i.rearGrounded && i.speed > 1 && i.rearSlip > 0.16 && target > 0) {
-      target *= Math.max(0.25, 1 - (i.rearSlip - 0.16) * 3.5);
+    if (sp.tractionControl && i.rearGrounded && i.speed > 1 && i.rearSlip > 0.12 && target > 0) {
+      target *= Math.max(0.15, 1 - (i.rearSlip - 0.12) * 6);
       this.tcActive = true;
       this.limiter = 'traction';
     }
@@ -141,6 +143,13 @@ export class Powertrain {
       target *= Math.max(0.35, 1 - (i.rearSlip - 0.07) * 5);
       this.tcActive = true;
       this.limiter = 'traction';
+    }
+    // Launch traction (assist, riding straight): hold the rear near peak grip instead of
+    // letting it flare into a burnout that loses drive. Fades out when steering (power slides).
+    const L = i.launch ?? 0;
+    if (L > 0 && i.rearGrounded && target > 0 && i.rearSlip > 0.1) {
+      target *= 1 - L * (1 - Math.max(0.3, 1 - (i.rearSlip - 0.1) * 5));
+      if (!this.tcActive) this.limiter = 'traction';
     }
     // Wheelie control: limit pitch past ~24°.
     this.wcActive = false;
