@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeVehicleSpec } from '../src/vehicle/spec';
 import { defaultBuild, PRESETS, sanitizeBuild } from '../src/vehicle/build';
-import { BATTERIES, BODY_KITS, BRAKES, CONTROLLERS, FENDERS, FORKS, FRAMES, HANDLEBARS, LIGHTS, MOTORS, RIM_STYLES, SEATS, SHOCKS, SWINGARMS, YOKES } from '../src/vehicle/parts';
+import { BATTERIES, BODY_KITS, BRAKES, CONTROLLERS, COOLING, DAMPERS, FENDERS, FORKS, FRAMES, HANDGUARDS, HANDLEBARS, LIGHTS, MOTORS, PEGS, RIM_STYLES, SEATS, SHOCKS, SWINGARMS, YOKES } from '../src/vehicle/parts';
 import { estimate } from '../src/vehicle/stats';
 import { Powertrain } from '../src/physics/powertrain';
 import { defaultSave, exportBuild, importBuild, migrate, SAVE_VERSION } from '../src/save/save';
@@ -27,7 +27,7 @@ describe('vehicle spec', () => {
 
   it('every part option changes the physical spec (no cosmetic-only performance parts)', () => {
     const base = JSON.stringify({ ...computeVehicleSpec(defaultBuild()), buildId: '' });
-    const lists = { motor: MOTORS, controller: CONTROLLERS, battery: BATTERIES, fork: FORKS, shock: SHOCKS, swingarm: SWINGARMS, yoke: YOKES, handlebar: HANDLEBARS, seat: SEATS, fenders: FENDERS, bodyKit: BODY_KITS, frame: FRAMES, lights: LIGHTS, brakes: BRAKES, rimStyle: RIM_STYLES } as const;
+    const lists = { motor: MOTORS, controller: CONTROLLERS, battery: BATTERIES, fork: FORKS, shock: SHOCKS, swingarm: SWINGARMS, yoke: YOKES, handlebar: HANDLEBARS, seat: SEATS, fenders: FENDERS, bodyKit: BODY_KITS, frame: FRAMES, lights: LIGHTS, brakes: BRAKES, rimStyle: RIM_STYLES, cooling: COOLING, damper: DAMPERS, pegs: PEGS, handguards: HANDGUARDS } as const;
     for (const [slot, list] of Object.entries(lists)) {
       for (const part of list) {
         const b = defaultBuild();
@@ -37,6 +37,47 @@ describe('vehicle spec', () => {
         expect(s === base, `${slot}:${part.id}`).toBe(false);
       }
     }
+  });
+
+  it('rider weight changes mass, centre of mass and acceleration', () => {
+    const light = defaultBuild(), heavy = defaultBuild();
+    light.rider.weight = 55;
+    heavy.rider.weight = 105;
+    const a = computeVehicleSpec(light), b = computeVehicleSpec(heavy);
+    expect(b.mass - a.mass).toBeCloseTo(50, 5);
+    expect(b.riderMass).toBe(105);
+    expect(b.com.y).toBeGreaterThan(a.com.y);
+    expect(estimate(b).topSpeedKmh).toBeLessThanOrEqual(estimate(a).topSpeedKmh);
+  });
+
+  it('cooling upgrades delay thermal derate; dampers and pegs change steering and weight shift', () => {
+    const b = defaultBuild();
+    b.parts.cooling = 'jacket';
+    b.parts.damper = 'race';
+    b.parts.pegs = 'wide';
+    const s0 = computeVehicleSpec(defaultBuild()), s1 = computeVehicleSpec(b);
+    expect(s1.powertrain.cooling).toBeGreaterThan(s0.powertrain.cooling * 1.5);
+    expect(s1.powertrain.thermalMass).toBeGreaterThan(s0.powertrain.thermalMass);
+    expect(s1.steering.damper).toBeGreaterThan(0);
+    expect(s1.rider.shift).toBeGreaterThan(s0.rider.shift);
+    // Same 40 s full-load run: the cooled motor ends up noticeably cooler.
+    const heat = (sp: typeof s0) => {
+      const p = new Powertrain(sp.powertrain);
+      const t0 = p.motorTemp;
+      for (let i = 0; i < 40 * 60; i++) p.update({ throttle: 1, brake: 0, wheelOmega: 12, rearSlip: 0, pitch: 0, frontAirborne: false, rearGrounded: true, speed: 4, dt: 1 / 60 });
+      return p.motorTemp - t0;
+    };
+    expect(heat(s1)).toBeLessThan(heat(s0) * 0.75);
+  });
+
+  it('old builds without rider gear migrate with matching colours', () => {
+    const old = JSON.parse(JSON.stringify(PRESETS[1])) as Record<string, unknown>;
+    delete old.rider;
+    (old.parts as Record<string, unknown>).cooling = undefined;
+    const b = sanitizeBuild(old);
+    expect(b.rider.weight).toBe(75);
+    expect(b.rider.helmetColor).toBe(PRESETS[1].visual.plasticColor);
+    expect(b.parts.cooling).toBe('stock');
   });
 
   it('estimates: sprockets change final drive and top speed', () => {

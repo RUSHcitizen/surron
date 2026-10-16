@@ -98,7 +98,7 @@ export function estimate(spec: VehicleSpec, mode: RideMode = 'sport'): Estimates
     batteryWh: spec.powertrain.capacityWh,
     voltage: spec.powertrain.voltage,
     rangeKm,
-    rangeCondition: 'steady 40 km/h, flat asphalt, 75 kg rider',
+    rangeCondition: `steady 40 km/h, flat asphalt, ${Math.round(spec.riderMass)} kg rider`,
     powerToWeight: (peakP * 1000) / m,
     wheelbase: spec.wheelbase,
     trail: spec.steering.trail,

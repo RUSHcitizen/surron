@@ -200,6 +200,33 @@ export function liveryTexture(base: string, decal: string, decalColor: string, a
           g.fill();
         }
         break;
+      case 'split':
+        g.beginPath();
+        g.moveTo(0, 256); g.lineTo(512, 90); g.lineTo(512, 256);
+        g.closePath();
+        g.fill();
+        g.fillStyle = accent;
+        g.beginPath();
+        g.moveTo(0, 240); g.lineTo(512, 74); g.lineTo(512, 90); g.lineTo(0, 256);
+        g.closePath();
+        g.fill();
+        break;
+      case 'checker':
+        for (let y = 0; y < 4; y++) for (let x = 0; x < 16; x++) if ((x + y) % 2 === 0) g.fillRect(x * 32, 160 + y * 24, 32, 24);
+        break;
+      case 'waves':
+        g.lineWidth = 12;
+        for (let k = 0; k < 4; k++) {
+          g.beginPath();
+          for (let x = 0; x <= 512; x += 8) {
+            const y = 120 + k * 30 + Math.sin(x / 50 + k) * 18;
+            if (x === 0) g.moveTo(x, y); else g.lineTo(x, y);
+          }
+          g.globalAlpha = 1 - k * 0.2;
+          g.stroke();
+        }
+        g.globalAlpha = 1;
+        break;
       default:
         break;
     }

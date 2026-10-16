@@ -26,7 +26,13 @@ interface Look {
   shortSleeves: boolean;
   shorts: boolean;
   longHair: boolean;
+  /** Idlers: looking at a phone (one hand up). */
+  phone: boolean;
 }
+
+/** walk: strolls a loop; jog: runs it; idle: stands (window shopping, on the phone); cheer: spectator. */
+export type PedKind = 'walk' | 'jog' | 'idle' | 'cheer';
+export interface PedStand { x: number; z: number; yaw: number }
 
 interface Ped {
   path: P2[];
@@ -45,6 +51,11 @@ interface Ped {
   timer: number;
   pause: number;
   look: Look;
+  kind: PedKind;
+  /** Standing spot (idle / cheer). */
+  home?: PedStand;
+  /** 0..1: how excited a spectator is (bike nearby and fast). */
+  excite: number;
 }
 
 const SKIN = [0xffdbac, 0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0x5c3a21];
@@ -69,8 +80,8 @@ export class Pedestrians {
   private active = Infinity;
   bumped = 0;
 
-  constructor(paths: P2[][], count: number, private groundAt: (x: number, z: number) => number) {
-    const r = mulberry32(42);
+  constructor(paths: P2[][], count: number, private groundAt: (x: number, z: number) => number, stands: PedStand[] = [], seed = 42) {
+    const r = mulberry32(seed);
     const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
     for (let i = 0; i < count && paths.length; i++) {
       const path = paths[i % paths.length];
@@ -79,11 +90,36 @@ export class Pedestrians {
       const look: Look = {
         scale: 0.9 + r() * 0.18, build: 0.88 + r() * 0.26, skin: new Color(pick(SKIN)), hair: new Color(pick(HAIR)),
         shirt: new Color(pick(SHIRT)), pants: new Color(pick(PANTS)), shoes: new Color(pick(SHOES)),
-        shortSleeves: r() < 0.5, shorts: r() < 0.25, longHair: r() < 0.4,
+        shortSleeves: r() < 0.5, shorts: r() < 0.25, longHair: r() < 0.4, phone: r() < 0.5,
+      };
+      const kr = r();
+      const kind: PedKind = kr < 0.14 ? 'jog' : kr < 0.3 ? 'idle' : 'walk';
+      if (kind === 'jog') Object.assign(look, { shorts: true, shortSleeves: true });
+      const ped: Ped = {
+        path: p, seg, t: r(), speed: kind === 'jog' ? 2.6 + r() * 0.7 : 1.05 + r() * 0.45, x: p[seg].x, z: p[seg].z, y: 0, heading: 0, lateral: 0,
+        targetLat: (r() - 0.5) * 1.2, phase: r() * 6, walk: 1, state: 'walk', timer: 0, pause: 0, look, kind, excite: 0,
+      };
+      if (kind === 'idle') {
+        // Stand at the inner edge of the sidewalk (by the shopfronts), facing the building.
+        const a = p[seg], b = p[(seg + 1) % p.length];
+        const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+        const tx = (b.x - a.x) / len, tz = (b.z - a.z) / len;
+        const t = 0.15 + r() * 0.7;
+        const side = path === p ? 1 : -1; // inside of the loop is on the left when walking the original direction
+        ped.home = { x: a.x + (b.x - a.x) * t - tz * 1.3 * side, z: a.z + (b.z - a.z) * t + tx * 1.3 * side, yaw: Math.atan2(-tz * side, tx * side) };
+      }
+      this.peds.push(ped);
+    }
+    // Spectators at fixed spots (track side, stunt park).
+    for (const st of stands) {
+      const look: Look = {
+        scale: 0.9 + r() * 0.18, build: 0.88 + r() * 0.26, skin: new Color(pick(SKIN)), hair: new Color(pick(HAIR)),
+        shirt: new Color(pick(SHIRT)), pants: new Color(pick(PANTS)), shoes: new Color(pick(SHOES)),
+        shortSleeves: r() < 0.6, shorts: r() < 0.3, longHair: r() < 0.4, phone: r() < 0.25,
       };
       this.peds.push({
-        path: p, seg, t: r(), speed: 1.05 + r() * 0.45, x: p[seg].x, z: p[seg].z, y: 0, heading: 0, lateral: 0, targetLat: (r() - 0.5) * 1.2,
-        phase: r() * 6, walk: 1, state: 'walk', timer: 0, pause: 0, look,
+        path: [{ x: st.x, z: st.z }], seg: 0, t: 0, speed: 0, x: st.x, z: st.z, y: 0, heading: st.yaw, lateral: 0, targetLat: 0,
+        phase: r() * 6, walk: 0, state: 'walk', timer: 0, pause: 0, look, kind: 'cheer', home: st, excite: 0,
       });
     }
     const n = Math.max(1, this.peds.length);
@@ -92,12 +128,12 @@ export class Pedestrians {
     const hairMat = new MeshStandardMaterial({ roughness: 0.55 });
     // Torso: a lathed profile (waist → chest → shoulders), slightly flattened front-to-back.
     const prof = [[0.0, 0], [0.14, 0], [0.145, 0.1], [0.158, 0.26], [0.182, 0.4], [0.17, 0.47], [0.11, 0.53], [0.05, 0.55], [0.0, 0.55]].map(([x, y]) => new Vector2(x, y));
-    const torsoG = new LatheGeometry(prof, 14);
+    const torsoG = new LatheGeometry(prof, 12);
     torsoG.scale(1, 1, 0.66);
-    const cap = (r0: number, len: number) => new CapsuleGeometry(r0, Math.max(0.01, len - 2 * r0), 3, 9);
-    const headG = new SphereGeometry(0.116, 16, 12);
+    const cap = (r0: number, len: number) => new CapsuleGeometry(r0, Math.max(0.01, len - 2 * r0), 2, 7);
+    const headG = new SphereGeometry(0.116, 12, 9);
     headG.scale(0.92, 1.08, 1);
-    const hairG = new SphereGeometry(0.124, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.55);
+    const hairG = new SphereGeometry(0.124, 12, 6, 0, Math.PI * 2, 0, Math.PI * 0.55);
     hairG.rotateX(-0.42); // tilt back: frees the forehead, covers the back of the head
     hairG.scale(0.95, 1.05, 1.04);
     const hairBackG = cap(0.075, 0.3);
@@ -125,7 +161,8 @@ export class Pedestrians {
     ];
     for (const [name, g, m, k] of defs) {
       const im = new InstancedMesh(g, m, n * k);
-      im.castShadow = true;
+      // Crowds don't cast shadows: a big saving in the shadow pass on phones.
+      im.castShadow = false;
       im.frustumCulled = false;
       this.parts[name] = im;
       this.root.add(im);
@@ -150,7 +187,13 @@ export class Pedestrians {
         P.shoe.setColorAt(j, L2.shoes);
       }
     });
+    // Place everyone once so they are correct even before the first update.
+    for (const p of this.peds) {
+      if (p.home) { p.x = p.home.x; p.z = p.home.z; p.heading = p.home.yaw; }
+      p.y = this.groundAt(p.x, p.z);
+    }
     this.root.visible = this.peds.length > 0;
+    this.render(0);
   }
 
   /** bike: position + velocity. Returns true if a pedestrian was bumped this frame. */
@@ -186,7 +229,26 @@ export class Pedestrians {
           }
         }
       }
-      if (p.state === 'sit') {
+      if (p.home && p.state !== 'sit') {
+        // Standing people: step aside when a bike comes at them, then drift back to their spot.
+        if (p.timer > 0) p.timer -= dt;
+        else if (p.state !== 'walk') { p.state = 'walk'; p.targetLat = 0; }
+        p.lateral += (p.targetLat - p.lateral) * Math.min(1, (p.state === 'startled' ? 5 : 2) * dt);
+        const rx = Math.cos(p.home.yaw), rz = -Math.sin(p.home.yaw);
+        p.x = p.home.x + rx * p.lateral;
+        p.z = p.home.z + rz * p.lateral;
+        let dh = p.home.yaw - p.heading;
+        dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+        p.heading += dh * Math.min(1, 4 * dt);
+        p.walk = Math.abs(p.targetLat - p.lateral) > 0.2 ? Math.min(1, p.walk + dt * 4) : Math.max(0, p.walk - dt * 3);
+        p.phase += dt * (1.6 + p.walk * 4);
+        if (p.kind === 'cheer') {
+          const near = d2 < 45 * 45 && bs > 6;
+          p.excite = near ? Math.min(1, p.excite + dt * 3) : Math.max(0, p.excite - dt * 0.8);
+          // Face the action while excited.
+          if (p.excite > 0.2) p.heading += Math.atan2(Math.sin(Math.atan2(-dx, -dz) - p.heading), Math.cos(Math.atan2(-dx, -dz) - p.heading)) * Math.min(1, 3 * dt);
+        }
+      } else if (p.state === 'sit') {
         p.timer -= dt;
         if (p.timer <= 0) { p.state = 'walk'; p.targetLat = 0; }
       } else {
@@ -212,7 +274,7 @@ export class Pedestrians {
         // Lateral offset is toward the inside of the block (left of travel) or out.
         p.x = a.x + (b.x - a.x) * p.t + -tz * p.lateral;
         p.z = a.z + (b.z - a.z) * p.t + tx * p.lateral;
-        p.phase += dt * (1.6 + sp * 3.2);
+        p.phase += dt * (p.kind === 'jog' ? 3.2 + sp * 2.2 : 1.6 + sp * 3.2);
         p.walk = sp > 0.05 && p.pause <= 0 ? Math.min(1, p.walk + dt * 3) : Math.max(0, p.walk - dt * 3);
       }
       p.y = this.groundAt(p.x, p.z);
@@ -252,12 +314,14 @@ export class Pedestrians {
       const lk = p.look, S = lk.scale, B = lk.build;
       const sit = p.state === 'sit', startled = p.state === 'startled';
       const w = sit ? 0 : p.walk;
+      const jog = p.kind === 'jog' && !sit ? 1 : 0;
       const ph = p.phase;
       // Root: feet on the ground, facing the walking direction, a slight lean into the stride.
       rootQ.setFromAxisAngle(_up, p.heading + (startled ? Math.sin(time * 20) * 0.08 : 0));
-      tilt.setFromAxisAngle(_x, 0.05 * w);
+      tilt.setFromAxisAngle(_x, (0.05 + jog * 0.1) * w);
       rootQ.multiply(tilt);
-      const bob = sit ? -0.42 : Math.abs(Math.cos(ph)) * 0.035 * w - 0.02 * w;
+      const cheerHop = p.kind === 'cheer' ? Math.max(0, Math.sin(time * 9 + i)) * 0.06 * p.excite : 0;
+      const bob = sit ? -0.42 : Math.abs(Math.cos(ph)) * (0.035 + jog * 0.05) * w - 0.02 * w + cheerHop;
       root.compose(_a.set(p.x, p.y + bob * S, p.z), rootQ, _s.setScalar(S));
       pelvis.set(0, L.hipY, sit ? -0.12 : 0);
       chest.set(0, L.hipY + L.torso * 0.62, 0.0);
@@ -280,8 +344,8 @@ export class Pedestrians {
         const j = i * 2 + k;
         // Legs: hip swing + knee bend through the stride (knee bends on the swing phase).
         const swing = Math.sin(ph + (k ? Math.PI : 0));
-        let hipA = swing * 0.42 * w;
-        let kneeA = Math.max(0, -Math.cos(ph + (k ? Math.PI : 0))) * 0.75 * w + 0.05;
+        let hipA = swing * (0.42 + jog * 0.2) * w;
+        let kneeA = Math.max(0, -Math.cos(ph + (k ? Math.PI : 0))) * (0.75 + jog * 0.6) * w + 0.05 + jog * 0.25;
         if (sit) { hipA = 1.45; kneeA = 1.5; }
         hip[k].set(side * L.hipW * B, L.hipY - 0.04, pelvis.z);
         knee.set(hip[k].x, hip[k].y - Math.cos(hipA) * L.thigh, hip[k].z + Math.sin(hipA) * L.thigh);
@@ -293,8 +357,17 @@ export class Pedestrians {
         this.place('shoe', j, _b.copy(ankle).add(_a.set(0, -0.04, 0.06)), root, rootQ, 1, _q2);
         // Arms: swing opposite to the legs, elbows soft; hands up when startled.
         sh.set(side * L.shW * B, L.hipY + L.torso - 0.06, 0);
-        let armA = -swing * 0.38 * w, elbow = 0.25 + Math.max(0, -swing) * 0.35 * w;
+        let armA = -swing * (0.38 + jog * 0.3) * w, elbow = 0.25 + Math.max(0, -swing) * 0.35 * w + jog * 1.1;
         let spread = 0.12;
+        if (p.kind === 'cheer' && p.excite > 0.05) {
+          // Arms up, waving.
+          armA = 0.4 + p.excite * 2.4 + Math.sin(time * 8 + k * 2 + i) * 0.25 * p.excite;
+          elbow = 0.3;
+          spread = 0.25 + p.excite * 0.2;
+        } else if ((p.kind === 'idle' || p.kind === 'cheer') && lk.phone && k === 1 && w < 0.3) {
+          armA = 0.5;
+          elbow = 1.9; // phone in hand, looking down
+        }
         if (startled) { armA = 2.4; elbow = 0.6; spread = 0.4; }
         if (sit) { armA = 0.6; elbow = 0.9; spread = 0.15; }
         el.set(sh.x + side * Math.sin(spread) * L.uarm, sh.y - Math.cos(armA) * Math.cos(spread) * L.uarm, sh.z + Math.sin(armA) * L.uarm);

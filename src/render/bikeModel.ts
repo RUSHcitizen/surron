@@ -3,7 +3,7 @@
  * so every geometric change (wheel size, swingarm, fork, battery, gearing...) is visible.
  */
 import {
-  BoxGeometry, CapsuleGeometry, CatmullRomCurve3, Float32BufferAttribute, CircleGeometry, Color, Curve, CylinderGeometry, DoubleSide, ExtrudeGeometry,
+  BoxGeometry, CapsuleGeometry, CatmullRomCurve3, Float32BufferAttribute, CircleGeometry, Curve, CylinderGeometry, DoubleSide, ExtrudeGeometry,
   Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, Object3D, Quaternion,
   Shape, SphereGeometry, TorusGeometry, TubeGeometry, Vector2, Vector3,
 } from 'three';
@@ -11,7 +11,7 @@ import type { BufferGeometry, Material } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { BikeBuild } from '../vehicle/build';
 import type { VehicleSpec, V3 } from '../vehicle/spec';
-import { BODY_KITS, FENDERS, FINISHES, LIGHTS, RIM_STYLES, byId } from '../vehicle/parts';
+import { BODY_KITS, COOLING, DAMPERS, FENDERS, FINISHES, HANDGUARDS, LIGHTS, PEGS, RIM_STYLES, byId } from '../vehicle/parts';
 import { liveryTexture, plateTexture, treadTexture } from './textures';
 
 const v = (p: V3) => new Vector3(p.x, p.y, p.z);
@@ -188,6 +188,10 @@ export class BikeModel {
     const kit = byId(BODY_KITS, build.parts.bodyKit);
     const fend = byId(FENDERS, build.parts.fenders);
     const lights = byId(LIGHTS, build.parts.lights);
+    const cool = byId(COOLING, build.parts.cooling);
+    const damperPart = byId(DAMPERS, build.parts.damper);
+    const pegPart = byId(PEGS, build.parts.pegs);
+    const guards = byId(HANDGUARDS, build.parts.handguards);
     const rimStyle = byId(RIM_STYLES, build.parts.rimStyle).id;
 
     const gloss = 1 - Math.min(1, fin.roughness * 1.6);
@@ -199,6 +203,8 @@ export class BikeModel {
     const gold = this.mat(new MeshStandardMaterial({ color: 0xd4a72c, roughness: 0.25, metalness: 0.9 }));
     const rimM = this.mat(new MeshStandardMaterial({ color: V.rimColor, roughness: 0.3, metalness: 0.7 }));
     const seatM = this.mat(new MeshStandardMaterial({ color: V.seatColor, roughness: 0.85 }));
+    const gripM = this.mat(new MeshStandardMaterial({ color: V.gripColor ?? '#1b1d22', roughness: 0.75 }));
+    const forkM = this.mat(new MeshStandardMaterial({ color: V.forkColor ?? '#c0c4cc', roughness: 0.22, metalness: 0.9 }));
     const livery = this.mat(new MeshPhysicalMaterial({
       map: liveryTexture(V.plasticColor, V.decal, V.decalColor, V.accentColor, V.number),
       roughness: fin.roughness, metalness: fin.metalness * 0.5, clearcoat: gloss, clearcoatRoughness: 0.12,
@@ -245,6 +251,31 @@ export class BikeModel {
     const motorCap = new Mesh(this.geo(new CylinderGeometry(G.motorRadius * 0.72, G.motorRadius * 0.78, 0.17, 32)), accent);
     motorCap.rotation.z = Math.PI / 2;
     motorCap.position.copy(motor.position);
+    if (cool.style === 'fins') {
+      // Radial heat-sink fins around the motor case.
+      const finG = this.geo(new TorusGeometry(G.motorRadius + 0.006, 0.006, 6, 36));
+      for (let k = -3; k <= 3; k++) {
+        const fin = new Mesh(finG, alloy);
+        fin.rotation.y = Math.PI / 2;
+        fin.position.copy(motor.position).add(new Vector3(k * 0.02, 0, 0));
+        this.chassis.add(fin);
+      }
+    } else if (cool.style === 'jacket') {
+      const jacket = new Mesh(this.geo(new CylinderGeometry(G.motorRadius + 0.012, G.motorRadius + 0.012, 0.13, 36)), accent);
+      jacket.rotation.z = Math.PI / 2;
+      jacket.position.copy(motor.position);
+      this.chassis.add(jacket);
+      // Small radiator ahead of the battery, with hoses.
+      const rad = new Mesh(this.geo(sideExtrude(roundedShape([[0.03, 0.09], [0.03, -0.09], [-0.01, -0.09], [-0.01, 0.09]], 0.01), 0.16, 0.006)), dark);
+      rad.position.set(0, 0.12, (G.battery.z + G.batterySize.z / 2) + 0.05);
+      this.chassis.add(rad);
+      const hose = (a: Vector3, b: Vector3) => {
+        const h = new Mesh(this.geo(new TubeGeometry(new CatmullRomCurve3([a, a.clone().lerp(b, 0.5).add(new Vector3(0, -0.04, 0.02)), b]), 12, 0.009, 6)), dark);
+        this.chassis.add(h);
+      };
+      hose(new Vector3(0.05, 0.05, G.battery.z + G.batterySize.z / 2 + 0.05), new Vector3(0.06, G.motor.y + 0.04, G.motor.z + 0.02));
+      hose(new Vector3(-0.05, 0.05, G.battery.z + G.batterySize.z / 2 + 0.05), new Vector3(-0.06, G.motor.y + 0.04, G.motor.z + 0.02));
+    }
     this.chassis.add(motorCap);
     const ctrl = new Mesh(this.geo(new BoxGeometry(0.1, 0.06, 0.18)), dark);
     ctrl.position.set(0, 0.06, -0.12);
@@ -314,7 +345,7 @@ export class BikeModel {
     tail.position.set(0, sy - 0.025, seatEnd - rearFenderLen * 0.72);
     // Footpegs
     for (const s of [1, -1]) {
-      const peg = new Mesh(this.geo(new CapsuleGeometry(0.014, 0.08, 3, 8)), alloy);
+      const peg = new Mesh(this.geo(new CapsuleGeometry(0.014 * (pegPart.width / 0.05), 0.08 + (pegPart.width - 0.05), 3, 8)), alloy);
       peg.rotation.z = Math.PI / 2;
       peg.position.set(s * (G.peg.x + 0.04), G.peg.y, G.peg.z);
       this.chassis.add(peg);
@@ -337,8 +368,9 @@ export class BikeModel {
     const forkUpperLen = 0.38;
     const upperR = G.invertedFork ? 0.028 : 0.02;
     const lowerR = G.invertedFork ? 0.02 : 0.028;
-    const upperM = G.invertedFork ? gold : alloy;
-    const lowerM = G.invertedFork ? alloy : dark;
+    // The anodised (coloured) tubes are the outer ones: uppers on an inverted fork, lowers otherwise.
+    const upperM = G.invertedFork ? forkM : alloy;
+    const lowerM = G.invertedFork ? alloy : forkM;
     for (const s of [1, -1]) {
       const up = new Mesh(this.geo(new CylinderGeometry(upperR, upperR, 1, 18)), upperM);
       const topP = headTop.clone().sub(head).add(new Vector3(s * 0.08, 0.02, 0));
@@ -364,7 +396,7 @@ export class BikeModel {
     between(riser, headTop.clone().sub(head), barC);
     this.steerG.add(riser);
     for (const s of [1, -1]) {
-      const grip = new Mesh(this.geo(new CapsuleGeometry(0.018, 0.1, 4, 12)), seatM);
+      const grip = new Mesh(this.geo(new CapsuleGeometry(0.018, 0.1, 4, 12)), gripM);
       grip.rotation.z = Math.PI / 2;
       grip.position.copy(barC).add(new Vector3(s * (G.barWidth / 2 - 0.06), 0, 0));
       this.steerG.add(grip);
@@ -372,6 +404,26 @@ export class BikeModel {
       lever.position.copy(barC).add(new Vector3(s * (G.barWidth / 2 - 0.12), -0.01, 0.06));
       lever.rotation.y = s * 0.25;
       this.steerG.add(lever);
+      if (guards.style !== 'none') {
+        // Curved shield ahead of the grip; the wrap style also loops back to the bar.
+        const gs = new Mesh(this.geo(sideExtrude(roundedShape([[0.09, 0.05], [0.07, -0.05], [-0.02, -0.03], [0.0, 0.06]], 0.03), 0.11, 0.01)), accent);
+        gs.position.copy(barC).add(new Vector3(s * (G.barWidth / 2 - 0.05), 0, 0.02));
+        gs.rotation.y = s * 0.12;
+        this.steerG.add(gs);
+        if (guards.style === 'wrap') {
+          const loop = new Mesh(this.geo(new TorusGeometry(0.075, 0.007, 6, 20, Math.PI)), alloy);
+          loop.position.copy(barC).add(new Vector3(s * (G.barWidth / 2 - 0.09), 0, 0.02));
+          loop.rotation.set(Math.PI / 2, 0, s > 0 ? -Math.PI / 2 : Math.PI / 2);
+          this.steerG.add(loop);
+        }
+      }
+    }
+    if (damperPart.damping > 0) {
+      // Steering damper: a body bolted to the frame, its rod to the top clamp.
+      const dBody = new Mesh(this.geo(new CapsuleGeometry(0.014, 0.12, 4, 10)), gold);
+      dBody.rotation.z = Math.PI / 2;
+      dBody.position.copy(headTop).add(new Vector3(0, 0.02, -0.07));
+      this.chassis.add(dBody);
     }
     // Front plate / headlight / fairing
     const plateCenter = headTop.clone().sub(head).add(new Vector3(0, -0.12, 0.09));
@@ -656,15 +708,16 @@ export class RiderModel {
 
   rebuild(build: BikeBuild) {
     this.dispose();
-    const accent = new Color(build.visual.accentColor);
-    const jersey = new MeshStandardMaterial({ color: accent.clone().lerp(new Color(0x1b1d22), 0.35), roughness: 0.75 });
-    const pants = new MeshStandardMaterial({ color: 0x23262d, roughness: 0.8 });
-    const shell = new MeshPhysicalMaterial({ color: build.visual.plasticColor, roughness: 0.3, metalness: 0.1, clearcoat: 1, clearcoatRoughness: 0.08 });
-    const trim = new MeshStandardMaterial({ color: build.visual.accentColor, roughness: 0.4 });
+    const R = build.rider ?? { helmet: 'mx', helmetColor: build.visual.plasticColor, helmetAccent: build.visual.accentColor, jerseyColor: build.visual.accentColor, pantsColor: '#23262d', bootColor: '#e9ebee', gloveColor: '#141619' };
+    const jersey = new MeshStandardMaterial({ color: R.jerseyColor, roughness: 0.75 });
+    const pants = new MeshStandardMaterial({ color: R.pantsColor, roughness: 0.8 });
+    const shell = new MeshPhysicalMaterial({ color: R.helmetColor, roughness: 0.3, metalness: 0.1, clearcoat: 1, clearcoatRoughness: 0.08 });
+    const trim = new MeshStandardMaterial({ color: R.helmetAccent, roughness: 0.4 });
     const lens = new MeshPhysicalMaterial({ color: 0x0c1016, roughness: 0.05, metalness: 0.9, clearcoat: 1 });
-    const black = new MeshStandardMaterial({ color: 0x141619, roughness: 0.6 });
-    const boot = new MeshStandardMaterial({ color: 0xe9ebee, roughness: 0.5 });
-    this.disposables.push(jersey, pants, shell, trim, lens, black, boot);
+    const black = new MeshStandardMaterial({ color: R.gloveColor, roughness: 0.6 });
+    const strapM = new MeshStandardMaterial({ color: 0x141619, roughness: 0.6 });
+    const boot = new MeshStandardMaterial({ color: R.bootColor, roughness: 0.5 });
+    this.disposables.push(jersey, pants, shell, trim, lens, black, strapM, boot);
     const G = <T extends BufferGeometry>(g: T) => (this.disposables.push(g), g);
     const add = (name: string, geo: BufferGeometry, m: Material, parent: Object3D = this.root) => {
       const mesh = new Mesh(geo, m);
@@ -686,22 +739,30 @@ export class RiderModel {
       add('shin' + s, cap(0.064, LIMB.shin), boot);
       add('foot' + s, cap(0.052, 0.26), boot);
     }
-    // Helmet: shell, chin bar, peak, goggles + strap.
+    // Helmet: shell plus style-specific chin bar, peak, goggles or visor.
     add('shell', G(new SphereGeometry(0.14, 28, 20)), shell, this.helmet).scale.set(1, 1.04, 1.12);
-    const chin = add('chin', G(new TorusGeometry(0.105, 0.035, 10, 24, Math.PI * 0.9)), shell, this.helmet);
-    chin.rotation.set(Math.PI / 2 + 0.35, 0, Math.PI * 0.05);
-    chin.position.set(0, -0.07, 0.03);
-    const peak = add('peak', G(sideExtrude(roundedShape([[0.26, 0.05], [0.24, 0.02], [0.04, 0.0], [0.05, 0.05]], 0.02), 0.2, 0.01)), trim, this.helmet);
-    peak.position.set(0, 0.035, -0.02);
-    peak.rotation.x = -0.18;
-    const gog = add('goggles', G(new CapsuleGeometry(0.035, 0.12, 4, 12)), lens, this.helmet);
-    gog.rotation.z = Math.PI / 2;
-    gog.position.set(0, 0.0, 0.135);
     const stripe = add('stripe', G(new TorusGeometry(0.143, 0.022, 6, 32, Math.PI * 1.1)), trim, this.helmet);
     stripe.rotation.set(0, Math.PI / 2, -Math.PI * 0.05);
     stripe.scale.set(1.12, 1.04, 1);
-    const strap = add('strap', G(new TorusGeometry(0.145, 0.012, 6, 32)), black, this.helmet);
-    strap.scale.set(1, 1, 1.1);
+    if (R.helmet !== 'trail') {
+      const chin = add('chin', G(new TorusGeometry(0.105, 0.035, 10, 24, Math.PI * 0.9)), shell, this.helmet);
+      chin.rotation.set(Math.PI / 2 + 0.35, 0, Math.PI * 0.05);
+      chin.position.set(0, -0.07, 0.03);
+    }
+    if (R.helmet === 'full') {
+      // Tinted visor across the face.
+      const visor = add('visor', G(new SphereGeometry(0.147, 24, 10, Math.PI * 0.18, Math.PI * 0.64, Math.PI * 0.4, Math.PI * 0.2)), lens, this.helmet);
+      visor.scale.set(1, 1.04, 1.12);
+    } else {
+      const peak = add('peak', G(sideExtrude(roundedShape(R.helmet === 'mx' ? [[0.26, 0.05], [0.24, 0.02], [0.04, 0.0], [0.05, 0.05]] : [[0.2, 0.04], [0.19, 0.02], [0.04, 0.0], [0.05, 0.04]], 0.02), 0.2, 0.01)), trim, this.helmet);
+      peak.position.set(0, 0.035, -0.02);
+      peak.rotation.x = -0.18;
+      const gog = add('goggles', G(new CapsuleGeometry(0.035, 0.12, 4, 12)), lens, this.helmet);
+      gog.rotation.z = Math.PI / 2;
+      gog.position.set(0, 0.0, 0.135);
+      const strap = add('strap', G(new TorusGeometry(0.145, 0.012, 6, 32)), strapM, this.helmet);
+      strap.scale.set(1, 1, 1.1);
+    }
     this.root.add(this.helmet);
   }
 

@@ -53,6 +53,8 @@ export interface Decor {
   /** Visual-only boxes (shopfronts, cornices, awnings, rooftop units); no collision. */
   vboxes: WorldBox[];
   tanks: { x: number; y: number; z: number }[];
+  /** Spectator spots (track side, stunt park), facing the action. */
+  spectators: { x: number; z: number; yaw: number }[];
 }
 
 export const WORLD = { size: 800, cell: 2.5, half: 400 };
@@ -234,7 +236,7 @@ export function generateWorld(seed = 7): WorldData {
   }
 
   const box = (b: WorldBox) => boxes.push(b);
-  const decor: Decor = { flags: [], tires: [], chargers: [], bushes: [], vboxes: [], tanks: [] };
+  const decor: Decor = { flags: [], tires: [], chargers: [], bushes: [], vboxes: [], tanks: [], spectators: [] };
   const vbox = (b: WorldBox) => decor.vboxes.push(b);
   const groundAt = (x: number, z: number) => hf.heightAt(x, z);
 
@@ -352,6 +354,10 @@ export function generateWorld(seed = 7): WorldData {
       pedPaths.push([
         { x: x0 + 2, z: z0 + 2 }, { x: x1 - 2, z: z0 + 2 }, { x: x1 - 2, z: z1 - 2 }, { x: x0 + 2, z: z1 - 2 },
       ]);
+      // Second, closer-to-the-shops loop walked the other way: two-way foot traffic.
+      pedPaths.push([
+        { x: x0 + 3.3, z: z1 - 3.3 }, { x: x1 - 3.3, z: z1 - 3.3 }, { x: x1 - 3.3, z: z0 + 3.3 }, { x: x0 + 3.3, z: z0 + 3.3 },
+      ].reverse());
       if (type === 'park') {
         for (let i = 0; i < 18; i++) trees.push({ x: x0 + 8 + rnd() * (w - 16), z: z0 + 8 + rnd() * (d - 16), s: 0.8 + rnd() * 0.6, kind: 1 });
         continue;
@@ -587,6 +593,15 @@ export function generateWorld(seed = 7): WorldData {
         const side = flagI % 2 ? 1 : -1;
         const off = TRACK_HALF + 6.5;
         flag(a.x - tz * off * side, a.z + tx * off * side, Math.atan2(tx, tz), flagI++);
+        // A small group of spectators behind every other flag, facing the track.
+        if (flagI % 2 === 0) {
+          const n = 2 + Math.floor(rnd() * 3);
+          for (let k = 0; k < n; k++) {
+            const o2 = off + 2 + rnd() * 1.5, along = (k - n / 2) * 1.1;
+            const sx = a.x - tz * o2 * side + tx * along, sz = a.z + tx * o2 * side + tz * along;
+            decor.spectators.push({ x: sx, z: sz, yaw: Math.atan2(a.x - sx, a.z - sz) + (rnd() - 0.5) * 0.4 });
+          }
+        }
       }
       if (Math.abs(turn) > 0.35 && tireAcc > 3.2) {
         tireAcc = 0;
@@ -598,6 +613,13 @@ export function generateWorld(seed = 7): WorldData {
   }
   // Stunt park perimeter flags.
   for (let i = 0; i < 6; i++) flag(STUNT.x - STUNT.w / 2 + 6 + i * 19, STUNT.z - STUNT.d / 2 - 2, 0, i);
+  for (let i = 0; i < 14; i++) {
+    const sx = STUNT.x - STUNT.w / 2 + 8 + i * 7 + rnd() * 2, sz = STUNT.z - STUNT.d / 2 - 4 - rnd() * 2;
+    decor.spectators.push({ x: sx, z: sz, yaw: (rnd() - 0.5) * 0.5 });
+  }
+  // Hub: people hanging out by the garage and chargers, and a hub stroll loop.
+  for (let i = 0; i < 8; i++) decor.spectators.push({ x: 28 + i * 3.4 + rnd(), z: 31 - rnd() * 2, yaw: Math.PI + (rnd() - 0.5) * 1.2 });
+  pedPaths.push([{ x: -30, z: 36 }, { x: 70, z: 36 }, { x: 70, z: -55 }, { x: -30, z: -55 }]);
 
   // Track flag poles at start
   labels.push({ text: 'MX TRACK', x: track[0].x, z: track[0].z, y: groundAt(track[0].x, track[0].z) + 4.5, yaw: checkpoints[0].yaw + Math.PI });

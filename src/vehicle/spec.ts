@@ -8,7 +8,7 @@
  *    The physics rigid body lives in the body frame.
  */
 import {
-  BATTERIES, BODY_KITS, BRAKES, COMPOUNDS, CONTROLLERS, FENDERS, FORKS, FRAMES, HANDLEBARS, LIGHTS, MOTORS,
+  BATTERIES, BODY_KITS, BRAKES, COMPOUNDS, CONTROLLERS, COOLING, DAMPERS, FENDERS, FORKS, FRAMES, HANDGUARDS, HANDLEBARS, LIGHTS, MOTORS, PEGS,
   RIM_STYLES, SEATS, SHOCKS, SWINGARMS, TREADS, YOKES, byId,
 } from './parts';
 import type { SurfaceId, TreadPart } from './parts';
@@ -136,6 +136,8 @@ export interface VehicleSpec {
     trail: number;
     maxSteer: number;
     leverage: number;
+    /** Steering damper strength (0 = none): slows bar movement at speed and adds yaw calm. */
+    damper: number;
   };
   wheelbase: number;
   cda: number;
@@ -221,6 +223,11 @@ export function computeVehicleSpec(build: BikeBuild): VehicleSpec {
   const lights = byId(LIGHTS, P.lights);
   const brakes = byId(BRAKES, P.brakes);
   const rim = byId(RIM_STYLES, P.rimStyle);
+  const cool = byId(COOLING, P.cooling);
+  const damper = byId(DAMPERS, P.damper);
+  const pegs = byId(PEGS, P.pegs);
+  const guards = byId(HANDGUARDS, P.handguards);
+  const riderMass = build.rider?.weight ?? RIDER_MASS;
 
   // --- Geometry (chassis frame, origin = swingarm pivot) -------------------
   const rake = (yoke.rake * Math.PI) / 180;
@@ -237,14 +244,15 @@ export function computeVehicleSpec(build: BikeBuild): VehicleSpec {
   const rearAxleExt = sub(rearRef, scale(rearAxis, 0.3 * shock.travel));
 
   const seatPos = v3(0, 0.38 + seat.height, -0.1 + T.riderPosition);
-  const peg = v3(0.16, -0.07, 0.04);
+  const peg = v3(0.16 + (pegs.width - 0.05) * 0.5, -0.07 + pegs.height, 0.04);
   const battery = v3(0, 0.2 + batt.heightOffset, 0.15);
   const bs = Math.cbrt(batt.size);
   const batterySize = v3(0.17 * bs, 0.3 * bs, 0.38 * bs);
   const motorPos = v3(0, -0.07, 0.1);
   const motorRadius = 0.075 + 0.0028 * motor.mass;
   const riderHip = v3(0, seatPos.y + 0.06, seatPos.z + 0.02);
-  const riderCom = v3(0, seatPos.y + 0.3 + bar.riderHeight * 0.5, seatPos.z + 0.1);
+  // Lower pegs drop the rider's legs (and a little of their mass) with them.
+  const riderCom = v3(0, seatPos.y + 0.3 + bar.riderHeight * 0.5 + pegs.height * 0.35, seatPos.z + 0.1);
   const shockTop = v3(0, 0.3, -0.02);
 
   // Wheels
@@ -269,7 +277,11 @@ export function computeVehicleSpec(build: BikeBuild): VehicleSpec {
     { m: bar.mass, p: barCenter, size: v3(bar.width, 0.05, 0.05) },
     { m: fend.mass + kit.mass, p: v3(0, 0.33, -0.02), size: v3(0.3, 0.3, 1.0) },
     { m: lights.mass, p: add(head, v3(0, 0.05, 0.1)), size: v3(0.15, 0.12, 0.08) },
-    { m: RIDER_MASS, p: riderCom, size: v3(0.42, 0.85, 0.36) },
+    { m: cool.mass, p: motorPos, size: v3(0.18, motorRadius * 2.2, motorRadius * 2.2) },
+    { m: damper.mass, p: head, size: v3(0.2, 0.04, 0.04) },
+    { m: pegs.mass, p: peg, size: v3(0.35, 0.03, 0.08) },
+    { m: guards.mass, p: barCenter, size: v3(bar.width, 0.08, 0.1) },
+    { m: riderMass, p: riderCom, size: v3(0.42 * Math.cbrt(riderMass / RIDER_MASS), 0.85, 0.36 * Math.cbrt(riderMass / RIDER_MASS)) },
   ];
   let mass = 0;
   let com = v3(0, 0, 0);
@@ -353,12 +365,12 @@ export function computeVehicleSpec(build: BikeBuild): VehicleSpec {
     bp('head', v3(0, riderHip.y + 0.78 + bar.riderHeight, riderHip.z + 0.3), 0.13, true),
   ];
 
-  const cda = 0.6 + bar.cda + kit.cda + fend.cda;
+  const cda = 0.6 + bar.cda + kit.cda + fend.cda + guards.cda + (cool.style === 'jacket' ? 0.01 : 0) + (riderMass - RIDER_MASS) * 0.0015;
 
   return {
     buildId: build.id,
     mass,
-    riderMass: RIDER_MASS,
+    riderMass,
     inertia,
     com,
     front,
@@ -370,6 +382,7 @@ export function computeVehicleSpec(build: BikeBuild): VehicleSpec {
       trail,
       maxSteer: (38 * Math.PI) / 180,
       leverage: bar.leverage,
+      damper: damper.damping,
     },
     wheelbase,
     cda,
@@ -391,8 +404,8 @@ export function computeVehicleSpec(build: BikeBuild): VehicleSpec {
       throttleMap: T.throttleMap,
       tractionControl: ctrl.tractionControl && T.tractionControl,
       wheelieControl: ctrl.tractionControl && T.wheelieControl,
-      thermalMass: motor.thermalMass,
-      cooling: motor.cooling,
+      thermalMass: motor.thermalMass * cool.thermalScale,
+      cooling: motor.cooling * cool.coolingScale,
       heat: ctrl.heat,
       deratingStart: motor.deratingStart,
       maxTemp: motor.maxTemp,
@@ -400,9 +413,9 @@ export function computeVehicleSpec(build: BikeBuild): VehicleSpec {
       pwmTone: ctrl.pwmTone,
       rotorInertia,
     },
-    rider: { hip: toBody(riderHip), shift: 0.16 + (seat.length - 0.6) * 0.5 },
+    rider: { hip: toBody(riderHip), shift: (0.16 + (seat.length - 0.6) * 0.5) * pegs.leverage },
     bodyPoints,
-    toughness: kit.toughness * frame.toughness,
+    toughness: kit.toughness * frame.toughness * guards.toughness,
     abs: brakes.abs,
     brakeBite: brakes.bite,
     headlight: lights.intensity,

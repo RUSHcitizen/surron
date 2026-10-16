@@ -191,6 +191,37 @@ export interface BrakePart extends PartBase {
   abs: boolean;
 }
 
+export interface CoolingPart extends PartBase {
+  mass: number;
+  /** Multipliers on the motor's thermal mass and heat rejection. */
+  thermalScale: number;
+  coolingScale: number;
+  style: 'none' | 'fins' | 'jacket';
+}
+
+export interface DamperPart extends PartBase {
+  mass: number;
+  /** 0 = none; higher = more steering damping at speed. */
+  damping: number;
+}
+
+export interface PegPart extends PartBase {
+  /** Extra mass over the stock pegs (which are counted in the frame), kg. */
+  mass: number;
+  /** Peg height offset (m; negative = lower) and width (m). */
+  height: number;
+  width: number;
+  /** Multiplier on how far the rider can shift weight fore/aft. */
+  leverage: number;
+}
+
+export interface HandguardPart extends PartBase {
+  mass: number;
+  cda: number;
+  toughness: number;
+  style: 'none' | 'open' | 'wrap';
+}
+
 export type SurfaceId = 'asphalt' | 'concrete' | 'dirt' | 'grass' | 'sand' | 'gravel';
 
 // ---------------------------------------------------------------------------
@@ -455,6 +486,37 @@ export const BRAKES: BrakePart[] = [
   { id: 'abs', name: 'Street ABS Kit', mass: 3.4, frontTorque: 400, rearTorque: 230, bite: 0.95, rotor: 0.22, abs: true, desc: 'Anti-lock brakes.', pros: ['Wheels never lock', 'Stable stops'], cons: ['Heaviest', 'No rear skid drifts', 'Limits stoppies'] },
 ];
 
+export const COOLING: CoolingPart[] = [
+  { id: 'stock', name: 'Stock Air Cooling', mass: 0, thermalScale: 1, coolingScale: 1, style: 'none', desc: 'Bare motor case.', pros: ['Lightest'], cons: ['Overheats on long full-power runs'] },
+  { id: 'fins', name: 'Finned Motor Cover', mass: 0.5, thermalScale: 1.25, coolingScale: 1.35, style: 'fins', desc: 'Machined heat-sink cover.', pros: ['Runs cooler', 'Delays thermal derate'], cons: ['+0.5 kg'] },
+  { id: 'jacket', name: 'Liquid Cooling Jacket', mass: 1.7, thermalScale: 1.7, coolingScale: 2.0, style: 'jacket', desc: 'Coolant jacket and small radiator.', pros: ['Holds full power far longer'], cons: ['+1.7 kg', 'Radiator adds a little drag'] },
+];
+
+export const DAMPERS: DamperPart[] = [
+  { id: 'none', name: 'No Steering Damper', mass: 0, damping: 0, desc: 'Bars move freely.', pros: ['Quickest turn-in'], cons: ['Twitchy at speed'] },
+  { id: 'trail', name: 'Trail Damper', mass: 0.35, damping: 0.6, desc: 'Light rotary damper.', pros: ['Calmer at speed and on landings'], cons: ['Slightly slower turn-in'] },
+  { id: 'race', name: 'Race Damper', mass: 0.55, damping: 1.2, desc: 'Stiff linear damper.', pros: ['Rock-solid at high speed'], cons: ['Heavy steering in tight turns', '+0.55 kg'] },
+];
+
+export const PEGS: PegPart[] = [
+  { id: 'stock', name: 'Stock Pegs', mass: 0, height: 0, width: 0.05, leverage: 1, desc: 'Factory pegs.', pros: ['Balanced'], cons: [] },
+  { id: 'wide', name: 'Wide MX Pegs', mass: 0.2, height: 0, width: 0.075, leverage: 1.2, desc: 'Big serrated platform.', pros: ['More weight-shift control (wheelies, stoppies, air)'], cons: ['+0.2 kg'] },
+  { id: 'low', name: 'Lowered Pegs', mass: 0.1, height: -0.03, width: 0.055, leverage: 1.05, desc: 'Pegs 30 mm lower.', pros: ['Lower centre of mass', 'More legroom'], cons: ['Scrape earlier when leaned over'] },
+];
+
+export const HANDGUARDS: HandguardPart[] = [
+  { id: 'none', name: 'No Handguards', mass: 0, cda: 0, toughness: 1, style: 'none', desc: 'Bare levers.', pros: ['Lightest'], cons: [] },
+  { id: 'open', name: 'Roost Deflectors', mass: 0.25, cda: 0.005, toughness: 1.03, style: 'open', desc: 'Plastic deflectors.', pros: ['Classic look'], cons: ['Tiny drag'] },
+  { id: 'wrap', name: 'Wrap-Around Guards', mass: 0.6, cda: 0.01, toughness: 1.1, style: 'wrap', desc: 'Alloy-backed guards.', pros: ['Better crash tolerance'], cons: ['+0.6 kg', 'More drag'] },
+];
+
+export const HELMET_STYLES = [
+  { id: 'mx', name: 'MX (peak + goggles)' },
+  { id: 'full', name: 'Full-face street' },
+  { id: 'trail', name: 'Trail (open face)' },
+] as const;
+export type HelmetStyle = (typeof HELMET_STYLES)[number]['id'];
+
 export const DECALS = [
   { id: 'none', name: 'None' },
   { id: 'stripes', name: 'Race Stripes' },
@@ -462,6 +524,9 @@ export const DECALS = [
   { id: 'chevron', name: 'Chevrons' },
   { id: 'camo', name: 'Digital Camo', unlock: 'cores15' },
   { id: 'circuit', name: 'Circuit Trace', unlock: 'medal3' },
+  { id: 'split', name: 'Two-Tone Split' },
+  { id: 'checker', name: 'Checker Flag' },
+  { id: 'waves', name: 'Speed Waves' },
 ] as const;
 
 export const FINISHES = [
@@ -469,6 +534,8 @@ export const FINISHES = [
   { id: 'matte', name: 'Matte', roughness: 0.85, metalness: 0.0 },
   { id: 'satin', name: 'Satin', roughness: 0.5, metalness: 0.1 },
   { id: 'metallic', name: 'Metallic', roughness: 0.3, metalness: 0.75 },
+  { id: 'chrome', name: 'Chrome', roughness: 0.08, metalness: 1.0 },
+  { id: 'pearl', name: 'Pearl', roughness: 0.18, metalness: 0.35 },
 ] as const;
 
 export type DecalId = (typeof DECALS)[number]['id'];

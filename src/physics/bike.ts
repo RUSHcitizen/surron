@@ -424,7 +424,9 @@ export class BikeDynamics {
       cmd = lerp(cmd, clamp(cmd, beta - peak, beta + peak), wl);
     }
     this.steerCmd = cmd;
-    const rate = T.rate * sp.steering.leverage * dt;
+    // A steering damper slows bar movement at speed (calmer, but slower turn-in).
+    const damp = sp.steering.damper * smoothstep(4, 18, av);
+    const rate = (T.rate * sp.steering.leverage * dt) / (1 + damp * 0.9);
     this.steer += clamp(cmd - this.steer, -rate, rate);
 
     // Rider weight shift (fore/aft), smoothed.
@@ -497,6 +499,8 @@ export class BikeDynamics {
         // Yaw damping (assist) tames snap slides without killing them.
         _tmp.copy(UP).multiplyScalar(-A.yawDamping * this.assist * this.yawRate * smoothstep(0, 4, av) * 0.3);
         torque.add(_tmp);
+        // Steering damper: extra yaw calm at speed (independent of assist; it's hardware).
+        if (sp.steering.damper > 0) torque.add(_tmp.copy(UP).multiplyScalar(-A.yawDamping * 0.18 * sp.steering.damper * this.yawRate * smoothstep(6, 20, av)));
         // Rider pulls / pushes the bars to pop the front (or rear) — fades once it is up, so
         // holding a wheelie or stoppie is about weight and throttle/brake, not a free torque.
         const pop = leanIn < 0 ? 1 - smoothstep(0.08, 0.4, this.pitch) : 1 - smoothstep(0.08, 0.4, -this.pitch);
@@ -834,6 +838,8 @@ export class BikeDynamics {
 
   crash(cause: string) {
     if (this.crashed) return;
+    // Going over backwards while holding the wheelie button is a loop-out, whatever touched first.
+    if (this.wheelieHold > 1 && this.pitch > 0.8) cause = 'looped out';
     this.crashed = true;
     this.crashTime = 0;
     this.crashCause = cause;

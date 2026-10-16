@@ -29,6 +29,7 @@ import { Scorer } from '../gameplay/scoring';
 import { CHALLENGES, ChallengeRun } from '../gameplay/challenges';
 import type { ChallengeDef } from '../gameplay/challenges';
 import { Pedestrians } from '../world/pedestrians';
+import type { PedStand } from '../world/pedestrians';
 import { SaveSystem } from '../save/save';
 import type { Settings } from '../save/save';
 import { UI } from '../ui/ui';
@@ -42,6 +43,7 @@ const QUALITY: Record<Settings['quality'], Quality> = {
 };
 
 const GRASS_MAX = 7000;
+const CITY_PEDS = 100;
 const _v = new Vector3(), _v2 = new Vector3(), _m = new Matrix4(), _gl = new Vector3(), _gr = new Vector3();
 
 export class Game {
@@ -67,6 +69,8 @@ export class Game {
   particles: Particles;
   peds: Pedestrians;
   grass: Grass;
+  /** Pedestrian groups with a bounding circle for distance culling. */
+  crowds: { peds: Pedestrians; cx: number; cz: number; r: number }[] = [];
   save = new SaveSystem();
   ui!: UI;
   state: GameState = 'menu';
@@ -117,8 +121,25 @@ export class Game {
     this.scene.add(this.headlight);
     this.marks = new TireMarks(this.scene);
     this.particles = new Particles(this.scene);
-    this.peds = new Pedestrians(this.data.pedPaths, 36, (x, z) => this.world.groundHeight(x, z, 1.5));
+    const ground = (x: number, z: number) => this.world.groundHeight(x, z, 1.5);
+    this.peds = new Pedestrians(this.data.pedPaths, CITY_PEDS, ground);
     this.scene.add(this.peds.root);
+    // Spectator crowds, one per area so each can be skipped (update + draw) when far away.
+    const areas = new Map<string, PedStand[]>();
+    for (const st of this.data.decor.spectators) {
+      const key = st.x > 90 && st.z > 20 && st.z < 130 ? 'stunt' : Math.hypot(st.x - 20, st.z) < 90 ? 'hub' : `track${Math.floor(st.z / 150)}`;
+      (areas.get(key) ?? areas.set(key, []).get(key)!).push(st);
+    }
+    let seed = 7;
+    for (const list of areas.values()) {
+      const peds = new Pedestrians([], 0, ground, list, seed++);
+      const cx = list.reduce((a, q) => a + q.x, 0) / list.length, cz = list.reduce((a, q) => a + q.z, 0) / list.length;
+      const r = Math.max(...list.map((q) => Math.hypot(q.x - cx, q.z - cz)));
+      this.crowds.push({ peds, cx, cz, r });
+      this.scene.add(peds.root);
+    }
+    // The city crowd spans the city and hub.
+    this.crowds.unshift({ peds: this.peds, cx: -165, cz: 0, r: 240 });
     this.cam = new ChaseCamera(this.camera, this.world);
     // iOS reports the new size late after rotation / toolbar changes, so resize again shortly after.
     const deferResize = () => {
@@ -194,7 +215,9 @@ export class Game {
     this.sun.shadow.normalBias = 0.03;
     this.grass.setCount(s.quality === 'low' ? 0 : s.quality === 'medium' ? 3800 : GRASS_MAX);
     this.particles.budget = s.quality === 'low' ? 0.4 : s.quality === 'medium' ? 0.75 : 1;
-    this.peds.setCount(s.pedestrians ? (s.quality === 'low' ? 12 : s.quality === 'medium' ? 24 : 36) : 0);
+    const pedShare = !s.pedestrians ? 0 : s.quality === 'low' ? 0.35 : s.quality === 'medium' ? 0.65 : 1;
+    this.peds.setCount(Math.round(CITY_PEDS * pedShare));
+    for (const c of this.crowds) if (c.peds !== this.peds) c.peds.setCount(Math.ceil(c.peds.peds.length * pedShare));
     this.camera.far = Math.max(this.quality.drawDistance + 400, 950);
     this.view.cullDistance = this.quality.drawDistance;
     (this.scene.fog as Fog).far = this.quality.drawDistance;
@@ -581,10 +604,13 @@ export class Game {
     if (knocked) this.audio.impact(0.2, 'bump', 'asphalt');
     this.view.updateCones(dt);
     // Pedestrians
-    if (this.settings.pedestrians && Math.abs(p.x + 200) < 260) {
-      if (this.peds.update(dt, p.x, p.z, b.vel.x, b.vel.z, this.time)) {
-        this.ui.toast('Watch out for pedestrians!');
-        b.vel.multiplyScalar(0.85);
+    if (this.settings.pedestrians) {
+      for (const c of this.crowds) {
+        if (Math.hypot(p.x - c.cx, p.z - c.cz) > c.r + 130) continue;
+        if (c.peds.update(dt, p.x, p.z, b.vel.x, b.vel.z, this.time)) {
+          this.ui.toast('Watch out for pedestrians!');
+          b.vel.multiplyScalar(0.85);
+        }
       }
     }
     // Auto-measured launch: 0–50 km/h from a standstill (free roam)
@@ -656,7 +682,7 @@ export class Game {
     this.grass.update(this.camera.position, this.time);
     // The crowd lives in the city (x < -35); skip drawing it from far away.
     const cp = this.camera.position;
-    this.peds.root.visible = this.settings.pedestrians && cp.x < 120 && Math.abs(cp.z) < 420;
+    for (const c of this.crowds) c.peds.root.visible = this.settings.pedestrians && Math.hypot(cp.x - c.cx, cp.z - c.cz) < c.r + 120;
   }
 
   get challenges() {

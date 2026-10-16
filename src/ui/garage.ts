@@ -17,8 +17,8 @@ import type { Estimates } from '../vehicle/stats';
 import { cloneBuild, PRESETS, sanitizeBuild, SPROCKET_FRONT_RANGE, SPROCKET_REAR_RANGE } from '../vehicle/build';
 import type { BikeBuild, TireConfig } from '../vehicle/build';
 import {
-  BATTERIES, BODY_KITS, BRAKES, COMPOUNDS, CONTROLLERS, DECALS, FENDERS, FINISHES, FORKS, FRAMES, FRONT_DIAMETERS, FRONT_WIDTHS,
-  HANDLEBARS, LIGHTS, MOTORS, PALETTE, PROFILES, REAR_DIAMETERS, REAR_WIDTHS, RIM_STYLES, SEATS, SHOCKS, SWINGARMS, TREADS, YOKES, byId,
+  BATTERIES, BODY_KITS, BRAKES, COMPOUNDS, CONTROLLERS, COOLING, DAMPERS, DECALS, FENDERS, FINISHES, FORKS, FRAMES, FRONT_DIAMETERS, FRONT_WIDTHS,
+  HANDGUARDS, HANDLEBARS, HELMET_STYLES, LIGHTS, MOTORS, PALETTE, PEGS, PROFILES, REAR_DIAMETERS, REAR_WIDTHS, RIM_STYLES, SEATS, SHOCKS, SWINGARMS, TREADS, YOKES, byId,
 } from '../vehicle/parts';
 import type { PartBase } from '../vehicle/parts';
 import { testBench } from '../physics/sim';
@@ -26,10 +26,10 @@ import type { BenchResult } from '../physics/sim';
 import { exportBuild, importBuild } from '../save/save';
 import { clear, download, h, pickFile, segmented, slider, toggle } from './dom';
 
-type Tab = 'power' | 'wheels' | 'suspension' | 'chassis' | 'paint' | 'builds' | 'test';
+type Tab = 'power' | 'wheels' | 'suspension' | 'chassis' | 'paint' | 'rider' | 'builds' | 'test';
 const TABS: { id: Tab; name: string }[] = [
   { id: 'power', name: 'Powertrain' }, { id: 'wheels', name: 'Wheels & Tires' }, { id: 'suspension', name: 'Suspension' },
-  { id: 'chassis', name: 'Chassis' }, { id: 'paint', name: 'Paint' }, { id: 'builds', name: 'Builds' }, { id: 'test', name: 'Test Bench' },
+  { id: 'chassis', name: 'Chassis' }, { id: 'paint', name: 'Paint' }, { id: 'rider', name: 'Rider' }, { id: 'builds', name: 'Builds' }, { id: 'test', name: 'Test Bench' },
 ];
 
 export class Garage {
@@ -226,7 +226,14 @@ export class Garage {
       frontAngle: 0, rearAngle: 0, riderShift: 0, riderLat: 0, speed: 0, brake: 0, crashed: false, headlight: true,
     });
     this.model.root.updateMatrixWorld(true);
-    this.model.rider.root.visible = false;
+    // The rider sits on the bike on the Rider tab (to preview gear), hidden elsewhere.
+    const showRider = this.tab === 'rider';
+    this.model.rider.root.visible = showRider;
+    if (showRider) {
+      const gl = new Vector3(), gr = new Vector3();
+      this.model.gripPositions(gl, gr);
+      this.model.rider.pose(this.spec, this.model.chassisGroup.matrixWorld, gl, gr, 0, 0, 0);
+    }
     const dist = o.dist * this.fit;
     this.camera.position.set(Math.sin(o.yaw) * Math.cos(o.pitch) * dist, target.y + Math.sin(o.pitch) * dist, Math.cos(o.yaw) * Math.cos(o.pitch) * dist);
     this.camera.lookAt(target);
@@ -272,6 +279,24 @@ export class Garage {
     this.el.append(left, center, right);
     this.renderBody();
     this.renderStats();
+  }
+
+  /** Palette swatches plus a custom colour picker. */
+  private colorRow(label: string, current: string, apply: (c: string) => void) {
+    const wrap = h('div', { class: 'swatches' });
+    for (const c of PALETTE) {
+      const s = h('button', { class: 'sw' + (current === c ? ' on' : ''), style: `background:${c}`, 'aria-label': `${label} ${c}` });
+      s.addEventListener('click', () => {
+        wrap.querySelectorAll('.sw').forEach((x) => x.classList.remove('on'));
+        s.classList.add('on');
+        apply(c);
+      });
+      wrap.append(s);
+    }
+    const custom = h('input', { type: 'color', class: 'sw-custom', value: current, 'aria-label': `${label} custom colour` }) as HTMLInputElement;
+    custom.addEventListener('change', () => apply(custom.value));
+    wrap.append(custom);
+    return h('div', {}, h('div', { class: 'row-label', style: 'margin-top:8px' }, label), wrap);
   }
 
   private partList<T extends PartBase>(items: T[], current: string, onPick: (p: T) => void, extra?: (p: T) => string) {
@@ -339,6 +364,8 @@ export class Garage {
           this.partList(CONTROLLERS, P.controller, (p) => this.change((d) => (d.parts.controller = p.id), true), (p) => `${(p.maxPower / 1000).toFixed(1)} kW cap`),
           this.section('Battery'),
           this.partList(BATTERIES, P.battery, pick('battery'), (p) => `${p.voltage} V · ${(p.capacityWh / 1000).toFixed(2)} kWh · ${kg(p)}`),
+          this.section('Motor cooling'),
+          this.partList(COOLING, P.cooling, pick('cooling'), kg),
           this.section('Final drive (sprockets)'),
           slider('Front sprocket', b.tuning.frontSprocket, SPROCKET_FRONT_RANGE[0], SPROCKET_FRONT_RANGE[1], 1, (v) => `${v} T`, (v) => this.change((d) => (d.tuning.frontSprocket = v))),
           slider('Rear sprocket', b.tuning.rearSprocket, SPROCKET_REAR_RANGE[0], SPROCKET_REAR_RANGE[1], 1, (v) => `${v} T`, (v) => this.change((d) => (d.tuning.rearSprocket = v))),
@@ -388,6 +415,9 @@ export class Garage {
           this.section('Body panels'), this.partList(BODY_KITS, P.bodyKit, pick('bodyKit'), kg),
           this.section('Brakes'), this.partList(BRAKES, P.brakes, pick('brakes'), (p) => `${p.frontTorque} / ${p.rearTorque} N·m`),
           this.section('Handlebar'), this.partList(HANDLEBARS, P.handlebar, pick('handlebar')),
+          this.section('Steering damper'), this.partList(DAMPERS, P.damper, pick('damper'), kg),
+          this.section('Handguards'), this.partList(HANDGUARDS, P.handguards, pick('handguards'), kg),
+          this.section('Footpegs'), this.partList(PEGS, P.pegs, pick('pegs')),
           this.section('Seat'), this.partList(SEATS, P.seat, pick('seat')),
           slider('Rider position', b.tuning.riderPosition, -0.08, 0.08, 0.01, (v) => `${v > 0 ? '+' : ''}${Math.round(v * 100)} cm`, (v) => this.change((d) => (d.tuning.riderPosition = v))),
           h('div', { class: 'note' }, 'Sitting further back makes wheelies easier and stoppies harder; forward keeps the front planted.'),
@@ -397,31 +427,36 @@ export class Garage {
         break;
       case 'paint': {
         const V = b.visual;
-        const swatch = (label: string, key: keyof BikeBuild['visual']) => {
-          const wrap = h('div', { class: 'swatches' });
-          for (const c of PALETTE) {
-            const s = h('button', { class: 'sw' + (V[key] === c ? ' on' : ''), style: `background:${c}`, 'aria-label': `${label} ${c}` });
-            s.addEventListener('click', () => {
-              wrap.querySelectorAll('.sw').forEach((x) => x.classList.remove('on'));
-              s.classList.add('on');
-              this.change((d) => ((d.visual as unknown as Record<string, string>)[key] = c));
-            });
-            wrap.append(s);
-          }
-          const custom = h('input', { type: 'color', class: 'sw-custom', value: V[key] as string, 'aria-label': `${label} custom colour` }) as HTMLInputElement;
-          custom.addEventListener('change', () => this.change((d) => ((d.visual as unknown as Record<string, string>)[key] = custom.value)));
-          wrap.append(custom);
-          return h('div', {}, h('div', { class: 'row-label', style: 'margin-top:8px' }, label), wrap);
-        };
+        const swatch = (label: string, key: keyof BikeBuild['visual']) =>
+          this.colorRow(label, V[key] as string, (c) => this.change((d) => ((d.visual as unknown as Record<string, string>)[key] = c)));
         const num = h('input', { value: V.number, maxlength: 3, class: 'btn small', style: 'width:80px;text-align:center', 'aria-label': 'Race number' }) as HTMLInputElement;
         num.addEventListener('change', () => this.change((d) => (d.visual.number = num.value)));
         B.append(
           swatch('Plastics', 'plasticColor'), swatch('Frame', 'frameColor'), swatch('Accent / springs', 'accentColor'),
-          swatch('Seat & grips', 'seatColor'), swatch('Rims', 'rimColor'),
+          swatch('Seat', 'seatColor'), swatch('Grips', 'gripColor'), swatch('Rims', 'rimColor'), swatch('Fork tubes (anodised)', 'forkColor'),
           segmented('Finish', FINISHES.map((f) => ({ id: f.id, name: f.name })), V.finish, (v) => this.change((d) => (d.visual.finish = v))),
           segmented('Decal', DECALS.map((dd) => ({ id: dd.id, name: dd.name, disabled: !this.game.isUnlocked((dd as { unlock?: string }).unlock), title: (dd as { unlock?: string }).unlock ? `Unlock: ${this.unlockText((dd as { unlock?: string }).unlock)}` : '' })), V.decal, (v) => this.change((d) => (d.visual.decal = v))),
           swatch('Decal colour', 'decalColor'), swatch('Number plate', 'plateColor'),
           h('label', { class: 'row' }, h('span', { class: 'row-label' }, 'Race number'), num),
+        );
+        break;
+      }
+      case 'rider': {
+        const R = b.rider;
+        const sw = (label: string, key: keyof BikeBuild['rider']) =>
+          this.colorRow(label, R[key] as string, (c) => this.change((d) => ((d.rider as unknown as Record<string, string>)[key] = c)));
+        B.append(
+          this.section('Rider'),
+          slider('Rider weight (with gear)', R.weight, 50, 115, 1, (v) => `${Math.round(v)} kg`, (v) => this.change((d) => (d.rider.weight = Math.round(v)))),
+          h('div', { class: 'note' }, 'Real physics: a lighter rider accelerates harder and wheelies sooner; a heavier rider adds grip and stability but brakes longer and runs the battery down faster.'),
+          this.section('Helmet'),
+          segmented('Style', HELMET_STYLES.map((x) => ({ id: x.id, name: x.name })), R.helmet, (v) => this.change((d) => (d.rider.helmet = v))),
+          sw('Helmet', 'helmetColor'), sw('Helmet stripe & peak', 'helmetAccent'),
+          this.section('Gear'),
+          sw('Jersey', 'jerseyColor'), sw('Pants', 'pantsColor'), sw('Boots', 'bootColor'), sw('Gloves', 'gloveColor'),
+          h('div', { class: 'btn-row', style: 'margin-top:10px' },
+            h('button', { class: 'btn small', onclick: () => this.change((d) => Object.assign(d.rider, { helmetColor: d.visual.plasticColor, helmetAccent: d.visual.accentColor, jerseyColor: d.visual.accentColor, pantsColor: d.visual.frameColor }), true) }, 'Match gear to bike paint'),
+          ),
         );
         break;
       }
@@ -718,7 +753,7 @@ export class Garage {
       s.data.builds.push(b);
     } else {
       const i = s.data.builds.findIndex((x) => x.id === b.id);
-      const perf = (x: BikeBuild) => JSON.stringify([x.parts, x.front, x.rear, x.tuning]);
+      const perf = (x: BikeBuild) => JSON.stringify([x.parts, x.front, x.rear, x.tuning, x.rider?.weight]);
       // Measurements no longer describe a build whose performance parts changed (paint is fine).
       if (perf(s.data.builds[i]) !== perf(b)) delete s.data.progress.measured[b.id];
       s.data.builds[i] = b;
