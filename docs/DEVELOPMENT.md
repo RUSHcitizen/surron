@@ -78,7 +78,7 @@ instead of exploding it.
 - [x] IndexedDB saves (versioned, migration, corruption-safe, fallbacks).
 - [x] PWA: manifest, icons, generated precaching service worker, offline fallback, cache versioning.
 - [x] Cloudflare Pages config (`_headers`, `wrangler.toml`, docs).
-- [x] 54 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] 53 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
 - [x] Round 4: skinned SDF rider (man in MX gear, sculpted helmets), arcade crash rule (only 30+ mph impacts or a
       looped-out wheelie; auto-righting), Hyper ride mode (up to ~230 km/h) with high-speed stability aids, wheelie/stoppie
       buttons that work at speed, spring-damped camera with a three-quarter trick view, post-processing (bloom, speed blur,

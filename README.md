@@ -187,7 +187,7 @@ npm run deploy        # = npm run build && npx wrangler deploy
 
 ## Tests
 
-* `npm test`: 54 Vitest tests.
+* `npm test`: 53 Vitest tests.
   * Physics scenarios:
     * settling and sag; acceleration and top speed; braking for every preset without flipping
     * turn equilibrium vs. tanφ = v²/(gR); right-steer → right-lean; low-speed U-turn; slaloms at 3 speeds
