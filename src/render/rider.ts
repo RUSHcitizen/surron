@@ -51,7 +51,7 @@ function twoBoneIK(a: Vector3, c: Vector3, l1: number, l2: number, hint: Vector3
 }
 
 // Elbows out and up (the MX attack position), knees forward.
-const armHint = (s: number, out: Vector3) => out.set(s * 1, 0.15, -0.3);
+const armHint = (s: number, out: Vector3) => out.set(s * 0.8, 0.02, -0.5);
 const legHint = (s: number, out: Vector3) => out.set(s * 0.25, 0.3, 1);
 
 /** Torso rounding: the spine bows up/back between hip and neck, like a rider over the bars. */
@@ -429,6 +429,31 @@ function buildHelmet(style: HelmetStyle) {
   return res;
 }
 
+/** Average each vertex colour with its neighbours `iterations` times (along mesh edges). */
+function smoothColors(src: Float32Array, g: BufferGeometry, iterations: number): Float32Array {
+  const idx = g.index!.array;
+  const n = src.length / 3;
+  let a: Float32Array = src, b: Float32Array = new Float32Array(src.length);
+  for (let it = 0; it < iterations; it++) {
+    b.set(a);
+    const cnt = new Float32Array(n).fill(1);
+    for (let t = 0; t < idx.length; t += 3) {
+      for (let e = 0; e < 3; e++) {
+        const p = idx[t + e], q = idx[t + ((e + 1) % 3)];
+        for (let k = 0; k < 3; k++) {
+          b[p * 3 + k] += a[q * 3 + k];
+          b[q * 3 + k] += a[p * 3 + k];
+        }
+        cnt[p]++;
+        cnt[q]++;
+      }
+    }
+    for (let v = 0; v < n; v++) for (let k = 0; k < 3; k++) b[v * 3 + k] /= cnt[v];
+    [a, b] = [b, a];
+  }
+  return a;
+}
+
 const lum = (c: Color) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
 
 /** Rider in MX gear, posed by IK. Lives in the scene separately so it can detach on crashes. */
@@ -485,10 +510,15 @@ export class RiderModel {
       brace: new Color(0x1d1f23), skin: new Color(0xc08a68),
     };
     const col = this.data.geometry.getAttribute('color') as BufferAttribute;
+    const base = new Float32Array(this.data.regions.length * 3);
     for (let v = 0; v < this.data.regions.length; v++) {
       const c = colors[REGIONS[this.data.regions[v]]];
-      col.setXYZ(v, c.r, c.g, c.b);
+      base[v * 3] = c.r;
+      base[v * 3 + 1] = c.g;
+      base[v * 3 + 2] = c.b;
     }
+    // Soften seams between gear pieces (vertex regions make a stair-stepped edge otherwise).
+    (col.array as Float32Array).set(smoothColors(base, this.data.geometry, 1));
     col.needsUpdate = true;
     const fabric = new MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 });
     const plastic = new MeshPhysicalMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.05, clearcoat: 0.4, clearcoatRoughness: 0.3 });
@@ -553,9 +583,11 @@ export class RiderModel {
     // Eyes up the trail: the head pitches back against the torso lean.
     j.headRot.setFromEuler(this.e.set(-(pitch - 0.5) * 0.4, 0, roll * 0.5));
     const grips = [gripL, gripR];
+    // Shoulders turn with the bars: the outside shoulder follows its grip forward.
+    const twist = (gripL.z - gripR.z) * 0.5;
     for (let i = 0; i < 2; i++) {
       const s = i === 0 ? 1 : -1;
-      j.sh[i].copy(j.neck).add(this.v.set(s * 0.19, -0.07, -0.02));
+      j.sh[i].copy(j.neck).add(this.v.set(s * 0.19, -0.07, -0.02 + s * twist * 0.7));
       j.wr[i].copy(grips[i]);
       twoBoneIK(j.sh[i], j.wr[i], LIMB.uarm, LIMB.farm, armHint(s, _h), j.el[i]);
       j.hipS[i].copy(j.hip).add(this.v.set(s * 0.105, 0, 0));

@@ -34,7 +34,7 @@ bike.root.updateMatrixWorld(true);
 const rider: RiderModel = bike.rider;
 if (q.get('white')) for (const c of rider.root.children) for (const m of ((c as Mesh).material as MeshStandardMaterial[])) { m.vertexColors = false; m.color.set(0xdddddd); }
 const gl = new Vector3(), gr = new Vector3();
-bike.update({ steer: 0, frontComp: 0.05, rearComp: 0.05, frontAngle: 0, rearAngle: 0, riderShift: Number(q.get('shift') ?? 0), riderLat: 0, speed: 8, brake: 0, crashed: false, headlight: false });
+bike.update({ steer: Number(q.get('steer') ?? 0), frontComp: 0.05, rearComp: 0.05, frontAngle: 0, rearAngle: 0, riderShift: Number(q.get('shift') ?? 0), riderLat: 0, speed: 8, brake: 0, crashed: false, headlight: false });
 bike.root.updateMatrixWorld(true);
 bike.gripPositions(gl, gr);
 if (pose === 'rest') { /* constructor rest pose */ rider.root.matrix.makeTranslation(0, 1.2, 0); rider.root.matrixWorldNeedsUpdate = true; } else if (pose === 'tumble') rider.tumble(new Vector3(0, 1, 0), new Quaternion());

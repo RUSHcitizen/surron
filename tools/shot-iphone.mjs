@@ -26,7 +26,7 @@ await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [T
 await page.waitForTimeout(2500);
 await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [T, { ...S, x: S.x + 40 }] });
 await page.waitForTimeout(1500);
-logs.push('[state] ' + JSON.stringify(await page.evaluate(() => { const g = window.voltline; return { inp: g.input.state, v: g.bike.speed.toFixed(1), lean: g.bike.lean.toFixed(2), fps: g.fps.toFixed(0) }; })));
+logs.push('[state] ' + JSON.stringify(await page.evaluate(() => { const g = window.voltline; const i = g.post ? { calls: g.post.sceneCalls, triangles: g.post.sceneTris } : g.renderer.info.render; return { inp: g.input.state, v: g.bike.speed.toFixed(1), lean: g.bike.lean.toFixed(2), fps: g.fps.toFixed(0), calls: i.calls, tris: i.triangles }; })));
 await page.screenshot({ path: `${out}-ride2.png` });
 await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 await page.tap('[data-action="pause"]');

@@ -101,6 +101,9 @@ export class PostFX {
   blur = 0;
   bloomStrength = 0.55;
   enabled = true;
+  /** Draw calls / triangles of the last scene pass (diagnostics; the final pass resets renderer.info). */
+  sceneCalls = 0;
+  sceneTris = 0;
 
   constructor(samples: number) {
     this.scene = new WebGLRenderTarget(1, 1, { type: HalfFloatType, samples, depthBuffer: true });
@@ -150,6 +153,8 @@ export class PostFX {
     }
     renderer.setRenderTarget(this.scene);
     renderer.render(scene, camera);
+    this.sceneCalls = renderer.info.render.calls;
+    this.sceneTris = renderer.info.render.triangles;
     // Bloom chain: threshold + downsample ×3, then tent-upsample back up, adding each level.
     const L = this.levels;
     const autoClear = renderer.autoClear;
