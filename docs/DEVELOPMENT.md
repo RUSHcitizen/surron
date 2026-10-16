@@ -9,7 +9,9 @@ src/
   physics/   bike.ts (6-DOF dynamics, tires, suspension, rider controller, crashes) · powertrain.ts
              tuning.ts (ALL handling constants) · sim.ts (headless scenarios: tests + garage test bench)
   world/     collision.ts (heightfield + OBBs, ray/sphere queries) · layout.ts (procedural map) · pedestrians.ts
-  render/    worldView.ts · bikeModel.ts (procedural bike + IK rider) · effects.ts · textures.ts (canvas textures)
+  render/    worldView.ts · bikeModel.ts (procedural bike) · rider.ts (skinned SDF rider + helmet, IK posing)
+             sdfMesh.ts (SDF primitives + surface-nets mesher) · pedParts.ts (near-LOD pedestrian parts)
+             postfx.ts (bloom, speed blur, grade) · effects.ts · textures.ts (canvas textures)
   camera/    chaseCamera.ts          input/  input.ts (keyboard/gamepad) · touch.ts
   audio/     audio.ts (procedural Web Audio)
   gameplay/  scoring.ts · challenges.ts
@@ -76,7 +78,11 @@ instead of exploding it.
 - [x] IndexedDB saves (versioned, migration, corruption-safe, fallbacks).
 - [x] PWA: manifest, icons, generated precaching service worker, offline fallback, cache versioning.
 - [x] Cloudflare Pages config (`_headers`, `wrangler.toml`, docs).
-- [x] 47 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] 54 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] Round 4: skinned SDF rider (man in MX gear, sculpted helmets), arcade crash rule (only 30+ mph impacts or a
+      looped-out wheelie; auto-righting), Hyper ride mode (up to ~230 km/h) with high-speed stability aids, wheelie/stoppie
+      buttons that work at speed, spring-damped camera with a three-quarter trick view, post-processing (bloom, speed blur,
+      grade, vignette), glass showroom, foliage shading, ground relief, near-LOD sculpted pedestrians.
 - [x] Round 3: cooling/damper/pegs/handguard parts, rider tab (weight + gear), more paint; ~100 city pedestrians with
       joggers/idlers and spectator crowds (per-area culling, no crowd shadows); lake with water shader, cloud shadows,
       baked tree AO, birds, night window lights and lamp light pools, speed vignette. Medium at iPhone-15 size measured
@@ -97,7 +103,8 @@ instead of exploding it.
   180–220 draw calls and 370–550k triangles per frame (shadow pass included); High adds grass density and shadow detail.
 - Not deployed to Cloudflare. No credentials were available; the steps are in the README.
 - Visuals are low-poly and procedural:
-  - People are smooth procedural figures, not scanned/skinned characters.
+  - The rider is a procedural skinned body, not a scanned character; there is no face (the helmet covers it).
+  - Pedestrians are rigid articulated parts (sculpted near the camera), not skinned.
   - Buildings are detailed boxes (no interiors, no curved architecture).
 - Physics:
   - Wheel hop and chatter are approximated (massless wheels).

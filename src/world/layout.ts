@@ -427,10 +427,19 @@ export function generateWorld(seed = 7): WorldData {
   for (const l of lights) box({ kind: 'invisible', tag: 'pole', x: l.x, y: 3, z: l.z, sx: 0.3, sy: 6, sz: 0.3 });
 
   // --- Hub ----------------------------------------------------------------
-  box({ kind: 'garage', color: 0x2a2f38, x: 20, y: 4, z: 46, sx: 28, sy: 8, sz: 16 });
-  labels.push({ text: 'STARK VARG GARAGE', x: 20, z: 37.9, y: 6.6, yaw: Math.PI });
+  // Showroom: light cladding, a glass front with mullions, a dark roof band with an accent
+  // stripe and a cantilevered canopy over the entrance (visual only).
+  box({ kind: 'garage', color: 0xd9dce0, x: 20, y: 4, z: 46, sx: 28, sy: 8, sz: 16 });
+  vbox({ kind: 'garage', style: 'trim', color: 0x24282f, x: 20, y: 8.25, z: 46, sx: 28.6, sy: 0.9, sz: 16.6 });
+  vbox({ kind: 'garage', style: 'trim', color: 0xc6f432, x: 20, y: 7.72, z: 37.68, sx: 28.62, sy: 0.16, sz: 0.06 });
+  vbox({ kind: 'garage', style: 'trim', color: 0x2b3038, x: 20, y: 6.05, z: 35.9, sx: 24, sy: 0.32, sz: 4.2 });
+  for (let i = -5; i <= 5; i++) vbox({ kind: 'garage', style: 'metal', color: 0x30353d, x: 20 + i * 2.2, y: 2.9, z: 37.9, sx: 0.12, sy: 5.8, sz: 0.14 });
+  vbox({ kind: 'garage', style: 'metal', color: 0x30353d, x: 20, y: 5.85, z: 37.9, sx: 22.4, sy: 0.14, sz: 0.14 });
+  for (const sx of [-1, 1]) vbox({ kind: 'garage', style: 'trim', color: 0x2b3038, x: 20 + sx * 11.6, y: 3, z: 35.6, sx: 0.35, sy: 6, sz: 0.35 });
+  labels.push({ text: 'STARK VARG GARAGE', x: 20, z: 37.3, y: 6.85, yaw: Math.PI });
   const garagePad = { x: 20, z: 32, r: 5 };
-  markings.push({ x: garagePad.x, z: garagePad.z, w: 9, l: 7, yaw: 0, color: 0x1f6f8b, y: 0.02 });
+  markings.push({ x: garagePad.x, z: garagePad.z, w: 9.4, l: 7.4, yaw: 0, color: 0xc6f432, y: 0.018 });
+  markings.push({ x: garagePad.x, z: garagePad.z, w: 9, l: 7, yaw: 0, color: 0x2a2e35, y: 0.022 });
   for (let i = 0; i < 4; i++) lights.push({ x: HUB.x0 + 10 + i * 30, z: HUB.z0 + 4, yaw: 0 });
   pedPaths.push([{ x: -30, z: -50 }, { x: 65, z: -50 }, { x: 65, z: 25 }, { x: -30, z: 25 }]);
   // Hub practice kickers

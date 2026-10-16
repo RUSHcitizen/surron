@@ -30,6 +30,7 @@ import { Scorer } from '../gameplay/scoring';
 import { CHALLENGES, ChallengeRun } from '../gameplay/challenges';
 import type { ChallengeDef } from '../gameplay/challenges';
 import { Pedestrians } from '../world/pedestrians';
+import { PostFX } from '../render/postfx';
 import type { PedStand } from '../world/pedestrians';
 import { SaveSystem } from '../save/save';
 import type { Settings } from '../save/save';
@@ -210,6 +211,7 @@ export class Game {
     this.perf.ceiling = 99;
     this.renderer.setPixelRatio(this.dynPR);
     this.renderer.shadowMap.enabled = this.quality.shadows;
+    this.setupPost(s.quality !== 'low');
     // Soft (many-tap) shadow filtering only on High; Medium uses plain PCF, much cheaper on phones.
     const shadowType = s.quality === 'high' ? PCFSoftShadowMap : PCFShadowMap;
     if (this.renderer.shadowMap.type !== shadowType) {
@@ -267,24 +269,28 @@ export class Game {
   }
 
   setTimeOfDay(mode: Settings['timeOfDay']) {
-    const dir = mode === 'day' ? new Vector3(0.5, 0.72, 0.38) : mode === 'sunset' ? new Vector3(-0.8, 0.2, 0.4) : new Vector3(0.3, 0.5, -0.4);
+    const dir = mode === 'day' ? new Vector3(0.55, 0.6, 0.42) : mode === 'sunset' ? new Vector3(-0.8, 0.2, 0.4) : new Vector3(0.3, 0.5, -0.4);
     dir.normalize();
     this.view.setTimeOfDay(mode, dir);
     this.sunDir.copy(dir);
     this.bakeEnvironment();
     const fog = this.scene.fog as Fog;
     if (mode === 'day') {
-      this.sun.color.set(0xfff1dc); this.sun.intensity = 2.9;
-      this.hemi.color.set(0xcfe3ff); this.hemi.groundColor.set(0x5a5040); this.hemi.intensity = 0.45;
-      fog.color.set(0xc6dbec); this.renderer.toneMappingExposure = 0.88;
+      // Bright, contrasty sunshine: strong key light, restrained sky fill.
+      this.sun.color.set(0xffefd6); this.sun.intensity = 3.3;
+      this.hemi.color.set(0xdde3ea); this.hemi.groundColor.set(0x6e6250); this.hemi.intensity = 0.6;
+      fog.color.set(0xbfd6ec); this.renderer.toneMappingExposure = 0.86;
+      this.scene.environmentIntensity = 0.5;
     } else if (mode === 'sunset') {
       this.sun.color.set(0xffa860); this.sun.intensity = 2.2;
       this.hemi.color.set(0x8d8fb8); this.hemi.groundColor.set(0x4a3a30); this.hemi.intensity = 0.35;
       fog.color.set(0xd9a477); this.renderer.toneMappingExposure = 1.05;
+      this.scene.environmentIntensity = 0.8;
     } else {
       this.sun.color.set(0x8fa6d6); this.sun.intensity = 0.35;
       this.hemi.color.set(0x334466); this.hemi.groundColor.set(0x111318); this.hemi.intensity = 0.25;
       fog.color.set(0x0b0f18); this.renderer.toneMappingExposure = 1.15;
+      this.scene.environmentIntensity = 0.35;
     }
     this.grass.setLighting(this.sun.color, this.sun.intensity, this.hemi.color, this.hemi.intensity + (mode === 'night' ? 0.1 : 0.6));
     this.headlight.intensity = mode === 'night' ? 60 * this.spec.headlight : mode === 'sunset' ? 18 * this.spec.headlight : 0;
@@ -354,10 +360,44 @@ export class Game {
     this.challenge = null;
   }
 
+  /** Post-processing (bloom, speed blur, grade) on Medium/High; Low renders straight to screen. */
+  private post: PostFX | null = null;
+  private setupPost(on: boolean) {
+    if (!on) {
+      this.post?.dispose();
+      this.post = null;
+      return;
+    }
+    if (this.post) return;
+    // HDR targets need a renderable half-float format; otherwise stay with direct rendering.
+    const ext = this.renderer.extensions;
+    if (!ext.has('EXT_color_buffer_float') && !ext.has('EXT_color_buffer_half_float')) return;
+    this.post = new PostFX(4);
+    this.resize();
+  }
+
+  private renderScene() {
+    const p = this.post;
+    if (p && this.perfLevel < 2) {
+      const riding = this.state === 'ride' && !this.bike.crashed;
+      const v = riding ? Math.abs(this.bike.speed) : 0;
+      // Speed blur from ~80 km/h, full by ~230 km/h.
+      const target = riding ? Math.max(0, Math.min(1, (v - 22) / 42)) : 0;
+      p.blur += (target - p.blur) * 0.1;
+      p.bloomStrength = this.settings.timeOfDay === 'night' ? 0.95 : this.settings.timeOfDay === 'sunset' ? 0.7 : 0.5;
+      p.render(this.renderer, this.scene, this.camera, this.time);
+    } else {
+      this.renderer.setRenderTarget(null);
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
   resize() {
     const w = this.container.clientWidth || window.innerWidth;
     const h = this.container.clientHeight || window.innerHeight;
     this.renderer.setSize(w, h);
+    const pr = this.renderer.getPixelRatio();
+    this.post?.setSize(w * pr, h * pr);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.particles.setViewport(h * this.renderer.getPixelRatio());
@@ -386,7 +426,7 @@ export class Game {
       this.input.update(dt, this.bike.speed);
       if (this.state === 'ride') this.rideUpdate(dt);
       else if (this.state === 'menu') this.menuUpdate(dt);
-      this.renderer.render(this.scene, this.camera);
+      this.renderScene();
       this.onFrame?.(dt);
     } catch (e) {
       this.reportError(e);

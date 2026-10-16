@@ -459,3 +459,62 @@ export function corrugatedTexture(): CanvasTexture {
     return tex(c, true);
   });
 }
+
+/** Showroom interior seen through the garage glass: lit ceiling, display bikes, banners. */
+export function showroomTexture(): CanvasTexture {
+  return cached('showroom', () => {
+    const { c, g } = canvas(1024, 256);
+    const wall = g.createLinearGradient(0, 0, 0, 256);
+    wall.addColorStop(0, '#2b3038');
+    wall.addColorStop(0.55, '#c9ccd1');
+    wall.addColorStop(0.62, '#8e939a');
+    wall.addColorStop(1, '#d8dadd');
+    g.fillStyle = wall;
+    g.fillRect(0, 0, 1024, 256);
+    // Ceiling light rows.
+    g.fillStyle = 'rgba(255,248,232,0.95)';
+    for (let x = 40; x < 1024; x += 120) g.fillRect(x, 14, 70, 7);
+    // Banners.
+    for (const [x, col] of [[150, '#c6f432'], [512, '#ff6b1a'], [870, '#00c2ff']] as const) {
+      g.fillStyle = '#16191e';
+      g.fillRect(x - 60, 40, 120, 70);
+      g.fillStyle = col;
+      g.fillRect(x - 60, 104, 120, 6);
+      g.fillStyle = '#ffffff';
+      g.font = '800 22px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      g.textAlign = 'center';
+      g.fillText('STARK', x, 70);
+      g.fillText('VARG', x, 95);
+    }
+    // Display bikes (side silhouettes) on the floor.
+    const bike = (x: number, col: string) => {
+      g.strokeStyle = '#111317';
+      g.lineWidth = 7;
+      for (const wx of [x - 46, x + 46]) {
+        g.beginPath();
+        g.arc(wx, 214, 24, 0, Math.PI * 2);
+        g.stroke();
+      }
+      g.fillStyle = col;
+      g.beginPath();
+      g.moveTo(x - 50, 182);
+      g.lineTo(x + 10, 170);
+      g.lineTo(x + 40, 178);
+      g.lineTo(x + 20, 200);
+      g.lineTo(x - 30, 200);
+      g.closePath();
+      g.fill();
+      g.fillStyle = '#1b1d22';
+      g.fillRect(x - 40, 168, 46, 7);
+      g.strokeStyle = '#9aa0a8';
+      g.lineWidth = 4;
+      g.beginPath();
+      g.moveTo(x + 46, 214);
+      g.lineTo(x + 30, 160);
+      g.stroke();
+    };
+    bike(300, '#e8e8ea');
+    bike(700, '#c6f432');
+    return tex(c);
+  });
+}

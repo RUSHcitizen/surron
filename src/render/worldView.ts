@@ -11,7 +11,7 @@ import type { Material } from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { WorldBox, WorldData } from '../world/layout';
 import { SURFACE_INDEX } from '../world/collision';
-import { corrugatedTexture, facadeSet, groundDetail, signTexture } from './textures';
+import { corrugatedTexture, facadeSet, groundDetail, showroomTexture, signTexture } from './textures';
 import type { FacadeStyle } from './textures';
 import { fbm } from '../core/noise';
 
@@ -82,6 +82,65 @@ function terrainMaterial(map: CanvasTexture) {
           vec2 cp = (p + cloudOffset) * 0.0045;
           float cs = smoothstep(0.5, 0.78, vnoise(cp) * 0.65 + vnoise(cp * 2.7 + 3.1) * 0.35);
           diffuseColor.rgb *= 1.0 - cs * cloudAmount;
+        }`)
+      // Surface relief near the camera: asphalt aggregate, concrete slab joints, clods in loose
+      // ground. Procedural height turned into a normal perturbation (no textures to download).
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        {
+          vec2 p = vWPos.xz;
+          float nb = 1.0 - smoothstep(10.0, 40.0, length(vWPos - cameraPosition));
+          float w = max(vSplat.x + vSplat.y + vSplat.z + vSplat.w, 1e-3);
+          float fineN = vnoise(p * 11.0);
+          float midN = vnoise(p * 2.3);
+          vec2 f = fract(p / 4.0);
+          float jd = min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y));
+          float hA = fineN;
+          float hC = smoothstep(0.0, 0.02, jd) * 1.4 + fineN * 0.15;
+          float hL = midN * 1.6 + fineN * 0.5;
+          float h = (vSplat.x * hA * 0.5 + vSplat.y * hC + vSplat.z * hL * 1.5 + vSplat.w * hL * 0.5) / w;
+          h *= nb * 0.012;
+          vec3 dpx = dFdx(-vViewPosition), dpy = dFdy(-vViewPosition);
+          float dhx = dFdx(h), dhy = dFdy(h);
+          vec3 r1 = cross(dpy, normal), r2 = cross(normal, dpx);
+          float det = dot(dpx, r1);
+          vec3 grad = sign(det) * (dhx * r1 + dhy * r2);
+          normal = normalize(abs(det) * normal - grad);
+        }`);
+  };
+  return m;
+}
+
+/**
+ * Foliage: leaf clumps from noise in the canopy's own space (light tips, dark gaps between
+ * clumps) and a matching bump, faded out with distance so it never shimmers.
+ */
+function foliage<T extends MeshStandardMaterial>(m: T): T {
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vLeaf; varying float vLeafDist;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vec3 leafOff = vec3(0.0);
+        #ifdef USE_INSTANCING
+          leafOff = instanceMatrix[3].xyz * 0.37;
+        #endif
+        vLeaf = position * 2.6 + leafOff;
+        vLeafDist = length((modelMatrix * vec4(position, 1.0)).xyz + leafOff / 0.37 - cameraPosition);`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vLeaf; varying float vLeafDist;' + NOISE_GLSL + `
+        float leafN(vec3 p) { return vnoise(p.xz * 2.1 + p.y * 1.3) * 0.55 + vnoise(p.xy * 2.7 - p.z) * 0.45; }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        float ln = leafN(vLeaf);
+        float lf = 1.0 - smoothstep(35.0, 110.0, vLeafDist);
+        diffuseColor.rgb *= mix(1.0, 0.62 + ln * 0.66, 0.35 + 0.65 * lf);
+        diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.12, 1.1, 0.72), smoothstep(0.62, 0.85, ln) * 0.5);`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        {
+          float h = ln * 0.05 * lf;
+          vec3 dpx = dFdx(-vViewPosition), dpy = dFdy(-vViewPosition);
+          float dhx = dFdx(h), dhy = dFdy(h);
+          vec3 r1 = cross(dpy, normal), r2 = cross(normal, dpx);
+          float det = dot(dpx, r1);
+          normal = normalize(abs(det) * normal - sign(det) * (dhx * r1 + dhy * r2));
         }`);
   };
   return m;
@@ -362,11 +421,18 @@ export class WorldView {
       m.receiveShadow = true;
       this.root.add(m);
     }
-    // Garage door + light strip
-    const door = new Mesh(new PlaneGeometry(10, 5.5), this.mat(new MeshStandardMaterial({ color: 0x0d1117, emissive: 0x0a3a4a, emissiveIntensity: 0.6 })));
-    door.position.set(20, 2.75, 37.95);
-    door.rotation.y = Math.PI;
-    this.root.add(door);
+    // Showroom glazing: reflective glass in front of a softly lit interior.
+    const interior = new Mesh(new PlaneGeometry(22, 5.8), this.mat(new MeshStandardMaterial({ color: 0x1b2129, emissive: 0xffffff, emissiveIntensity: 0.55, emissiveMap: showroomTexture(), map: showroomTexture() })));
+    interior.position.set(20, 2.9, 37.965);
+    interior.rotation.y = Math.PI;
+    const glass = new Mesh(new PlaneGeometry(22, 5.8), this.mat(new MeshPhysicalMaterial({ color: 0x6f8494, metalness: 0.1, roughness: 0.03, transparent: true, opacity: 0.2, clearcoat: 1, envMapIntensity: 1.2, depthWrite: false })));
+    glass.position.set(20, 2.9, 37.9);
+    glass.rotation.y = Math.PI;
+    // Canopy downlights.
+    const strip = new Mesh(new PlaneGeometry(22, 0.25), this.mat(new MeshBasicMaterial({ color: 0xfff4e0 })));
+    strip.position.set(20, 5.88, 35.2);
+    strip.rotation.x = Math.PI / 2;
+    this.root.add(interior, glass, strip);
   }
 
   private buildMarkings() {
@@ -404,8 +470,8 @@ export class WorldView {
     // Trees
     const trees = this.data.trees.slice(0, q.trees);
     const pines = trees.filter((t) => t.kind === 0), broad = trees.filter((t) => t.kind === 1);
-    const pineM = this.mat(new MeshStandardMaterial({ vertexColors: true, roughness: 0.82 }));
-    const leafM = this.mat(new MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }));
+    const pineM = this.mat(foliage(new MeshStandardMaterial({ vertexColors: true, roughness: 0.82 })));
+    const leafM = this.mat(foliage(new MeshStandardMaterial({ vertexColors: true, roughness: 0.8 })));
     // Instanced props are split into spatial chunks so frustum culling (main and shadow
     // cameras) and distance culling skip whatever is off-screen or far away.
     const CHUNK = 220;
@@ -530,7 +596,7 @@ export class WorldView {
       }
     });
     // Bushes in planters.
-    const bushM = this.mat(new MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }));
+    const bushM = this.mat(foliage(new MeshStandardMaterial({ vertexColors: true, roughness: 0.8 })));
     const bushes = new InstancedMesh(shadeVertical(lumpGeometry(1, 2, 0.25, 9), new Color(0x27451a), new Color(0x6f9a3c), -0.8, 1), bushM, D.bushes.length);
     D.bushes.forEach((b, i) => {
       m4.compose(p.set(b.x, hf.heightAt(b.x, b.z) + 0.6 + b.s * 0.5, b.z), q.identity(), sc.setScalar(b.s * 2.2));

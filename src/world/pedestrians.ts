@@ -14,6 +14,7 @@ import type { BufferGeometry } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { P2 } from './layout';
 import { mulberry32 } from '../core/noise';
+import { pedHiParts } from '../render/pedParts';
 
 interface Look {
   scale: number; // overall height factor
@@ -71,11 +72,22 @@ const _m = new Matrix4(), _q = new Quaternion(), _q2 = new Quaternion(), _p = ne
 const _a = new Vector3(), _b = new Vector3(), _up = new Vector3(0, 1, 0), _x = new Vector3(1, 0, 0);
 
 type Part = 'torso' | 'pelvis' | 'neck' | 'head' | 'face' | 'hair' | 'hairBack' | 'uarm' | 'farm' | 'hand' | 'thigh' | 'shin' | 'shoe';
+const LIMBS = ['uarm', 'farm', 'hand', 'thigh', 'shin', 'shoe'];
+/** Near level of detail: at most this many people, within this distance of the bike (m). */
+const NEAR_MAX = 14;
+const NEAR_R = 22;
+const _white = new Color(1, 1, 1);
 
 export class Pedestrians {
   root = new Group();
   peds: Ped[] = [];
   private parts = {} as Record<Part, InstancedMesh>;
+  /** Near level of detail: sculpted parts for the few people closest to the player. */
+  private hi = {} as Record<Part, InstancedMesh>;
+  /** The part set being written and the slot of the person being written. */
+  private P = this.parts;
+  private lodX = Infinity;
+  private lodZ = Infinity;
   private aiTimer = 0;
   private active = Infinity;
   bumped = 0;
@@ -159,6 +171,7 @@ export class Pedestrians {
       ['uarm', cap(0.06, L.uarm), mat, 2], ['farm', cap(0.05, L.farm), mat, 2], ['hand', new SphereGeometry(0.05, 12, 10), skinMat, 2],
       ['thigh', cap(0.088, L.thigh), mat, 2], ['shin', cap(0.066, L.shin), mat, 2], ['shoe', shoeG, mat, 2],
     ];
+    const hiGeo = pedHiParts(L) as Partial<Record<Part, BufferGeometry>>;
     for (const [name, g, m, k] of defs) {
       const im = new InstancedMesh(g, m, n * k);
       // Crowds don't cast shadows: a big saving in the shadow pass on phones.
@@ -166,6 +179,13 @@ export class Pedestrians {
       im.frustumCulled = false;
       this.parts[name] = im;
       this.root.add(im);
+      const hm = new InstancedMesh(hiGeo[name] ?? g, m, NEAR_MAX * k);
+      hm.castShadow = false;
+      hm.frustumCulled = false;
+      hm.count = 0;
+      hm.setColorAt(0, new Color());
+      this.hi[name] = hm;
+      this.root.add(hm);
     }
     // Per-person colours.
     this.peds.forEach((p, i) => {
@@ -203,6 +223,8 @@ export class Pedestrians {
     const think = this.aiTimer <= 0;
     if (think) this.aiTimer = 1 / 15;
     const bs = Math.hypot(bvx, bvz);
+    this.lodX = bx;
+    this.lodZ = bz;
     const n = Math.min(this.active, this.peds.length);
     for (let pi = 0; pi < n; pi++) {
       const p = this.peds[pi];
@@ -293,7 +315,7 @@ export class Pedestrians {
     _p.copy(a).lerp(b, 0.5).applyMatrix4(root);
     const sc = root.getMaxScaleOnAxis();
     _m.compose(_p, _q, _s.set(w * sc, (len / nominal) * sc, w * sc));
-    this.parts[part].setMatrixAt(idx, _m);
+    this.P[part].setMatrixAt(idx, _m);
   }
 
   private place(part: Part, idx: number, at: Vector3, root: Matrix4, rootQ: Quaternion, scale: number, extraQ?: Quaternion) {
@@ -301,7 +323,7 @@ export class Pedestrians {
     _q.copy(rootQ);
     if (extraQ) _q.multiply(extraQ);
     _m.compose(_p, _q, _s.setScalar(scale * root.getMaxScaleOnAxis()));
-    this.parts[part].setMatrixAt(idx, _m);
+    this.P[part].setMatrixAt(idx, _m);
   }
 
   private render(time: number) {
@@ -309,9 +331,19 @@ export class Pedestrians {
     const hip = [new Vector3(), new Vector3()], knee = new Vector3(), ankle = new Vector3(), sh = new Vector3(), el = new Vector3(), hand = new Vector3();
     const pelvis = new Vector3(), chest = new Vector3(), neckP = new Vector3(), headP = new Vector3();
     const n = Math.min(this.active, this.peds.length);
+    let near = 0;
     for (let i = 0; i < n; i++) {
       const p = this.peds[i];
       const lk = p.look, S = lk.scale, B = lk.build;
+      // The closest few get the sculpted parts; their simple slots are emptied.
+      const isNear = near < NEAR_MAX && (p.x - this.lodX) ** 2 + (p.z - this.lodZ) ** 2 < NEAR_R * NEAR_R;
+      let s0 = i;
+      if (isNear) {
+        this.hideSimple(i);
+        s0 = near++;
+        this.P = this.hi;
+        this.colorHi(s0, lk);
+      } else this.P = this.parts;
       const sit = p.state === 'sit', startled = p.state === 'startled';
       const w = sit ? 0 : p.walk;
       const jog = p.kind === 'jog' && !sit ? 1 : 0;
@@ -330,18 +362,18 @@ export class Pedestrians {
       const twist = Math.sin(ph) * 0.1 * w;
       // Torso & hips
       _q2.setFromAxisAngle(_up, twist);
-      this.placeScaled('torso', i, _b.set(0, L.hipY - 0.03, 0), root, rootQ, _q2, _a.set(B, 1, B));
-      this.placeScaled('pelvis', i, pelvis, root, rootQ, null, _a.set(B, 1, 1));
-      this.place('neck', i, neckP, root, rootQ, 1);
+      this.placeScaled('torso', s0, _b.set(0, L.hipY - 0.03, 0), root, rootQ, _q2, _a.set(B, 1, B));
+      this.placeScaled('pelvis', s0, pelvis, root, rootQ, null, _a.set(B, 1, 1));
+      this.place('neck', s0, neckP, root, rootQ, 1);
       _q2.setFromAxisAngle(_up, -twist * 0.6 + (startled ? 0.5 : 0));
-      this.place('head', i, headP, root, rootQ, 1, _q2);
-      this.place('face', i, headP, root, rootQ, 1, _q2);
-      this.place('hair', i, _b.copy(headP).add(_a.set(0, 0.012, -0.008)), root, rootQ, 1, _q2);
-      if (lk.longHair) this.place('hairBack', i, _b.copy(headP).add(_a.set(0, -0.09, -0.07)), root, rootQ, 1, _q2);
-      else this.place('hairBack', i, headP, root, rootQ, 0);
+      this.place('head', s0, headP, root, rootQ, 1, _q2);
+      this.place('face', s0, headP, root, rootQ, 1, _q2);
+      this.place('hair', s0, _b.copy(headP).add(_a.set(0, 0.012, -0.008)), root, rootQ, 1, _q2);
+      if (lk.longHair) this.place('hairBack', s0, _b.copy(headP).add(_a.set(0, -0.09, -0.07)), root, rootQ, 1, _q2);
+      else this.place('hairBack', s0, headP, root, rootQ, 0);
       for (let k = 0; k < 2; k++) {
         const side = k ? 1 : -1;
-        const j = i * 2 + k;
+        const j = s0 * 2 + k;
         // Legs: hip swing + knee bend through the stride (knee bends on the swing phase).
         const swing = Math.sin(ph + (k ? Math.PI : 0));
         let hipA = swing * (0.42 + jog * 0.2) * w;
@@ -378,7 +410,9 @@ export class Pedestrians {
         this.place('hand', j, hand.addScaledVector(_d.subVectors(hand, el).normalize(), 0.03), root, rootQ, 1);
       }
     }
-    for (const m of Object.values(this.parts)) {
+    this.P = this.parts;
+    for (const [k, m] of Object.entries(this.hi)) m.count = near * (LIMBS.includes(k) ? 2 : 1);
+    for (const m of [...Object.values(this.parts), ...Object.values(this.hi)]) {
       m.instanceMatrix.needsUpdate = true;
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
     }
@@ -390,11 +424,42 @@ export class Pedestrians {
     if (extraQ) _q.multiply(extraQ);
     const sc = root.getMaxScaleOnAxis();
     _m.compose(_p, _q, _s.copy(scale).multiplyScalar(sc));
-    this.parts[part].setMatrixAt(idx, _m);
+    this.P[part].setMatrixAt(idx, _m);
+  }
+
+  /** Empty a person's simple-part slots (they are drawn with the near set this frame). */
+  private hideSimple(i: number) {
+    _m.makeScale(0, 0, 0);
+    for (const [k, m] of Object.entries(this.parts)) {
+      if (LIMBS.includes(k)) {
+        m.setMatrixAt(i * 2, _m);
+        m.setMatrixAt(i * 2 + 1, _m);
+      } else m.setMatrixAt(i, _m);
+    }
+  }
+
+  private colorHi(s: number, lk: Look) {
+    const P = this.hi;
+    P.torso.setColorAt(s, lk.shirt);
+    P.pelvis.setColorAt(s, lk.pants);
+    P.neck.setColorAt(s, lk.skin);
+    P.head.setColorAt(s, lk.skin);
+    P.face.setColorAt(s, _white);
+    P.hair.setColorAt(s, lk.hair);
+    P.hairBack.setColorAt(s, lk.hair);
+    for (let k = 0; k < 2; k++) {
+      const j = s * 2 + k;
+      P.uarm.setColorAt(j, lk.shirt);
+      P.farm.setColorAt(j, lk.shortSleeves ? lk.skin : lk.shirt);
+      P.hand.setColorAt(j, lk.skin);
+      P.thigh.setColorAt(j, lk.pants);
+      P.shin.setColorAt(j, lk.shorts ? lk.skin : lk.pants);
+      P.shoe.setColorAt(j, lk.shoes);
+    }
   }
 
   setCount(n: number) {
     this.active = Math.min(n, this.peds.length);
-    for (const [k, m] of Object.entries(this.parts)) m.count = this.active * (['uarm', 'farm', 'hand', 'thigh', 'shin', 'shoe'].includes(k) ? 2 : 1);
+    for (const [k, m] of Object.entries(this.parts)) m.count = this.active * (LIMBS.includes(k) ? 2 : 1);
   }
 }

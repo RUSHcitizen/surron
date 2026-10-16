@@ -41,7 +41,7 @@ The service worker is only registered in production builds (`npm run build && np
 | **X** | **Stoppie button** (hold). Weight forward plus front brake; too long at speed sends you over the bars |
 | **R** | Reset to the last safe spot |
 | **C** | Camera: chase / far / helmet |
-| **M** | Ride mode: Eco / Standard / Sport |
+| **M** | Ride mode: Eco / Standard / Sport / **Hyper** (very fast: up to ~230 km/h depending on the bike) |
 | **G** | Garage |
 | **L** | Headlight |
 | **H** | Toggle HUD |
@@ -64,8 +64,11 @@ The service worker is only registered in production builds (`npm run build && np
 
 * **Graphics**:
   * Smooth, sculpted bike bodywork with clear-coat paint and reflections from a sky environment map.
-  * Rider with capsule limbs, gloves, boots and an MX helmet with peak, goggles and chin bar.
-  * Articulated pedestrians with individual height, build, skin tone, hair and outfits, faces, and a walk cycle with knees and elbows.
+  * A realistic rider: one continuous, smoothly skinned body of a man in motocross gear (jersey with cuffs, pants with leg
+    stripes, knee guards, tall buckled boots, gloves, neck brace) and a sculpted helmet (MX, full-face or trail) with chin bar,
+    peak, goggles and strap. It is modelled as a signed distance field, meshed at load and posed by IK on the bike every frame.
+  * Articulated pedestrians with individual height, build, skin tone, hair and outfits, faces, and a walk cycle with knees and
+    elbows. People near you switch to sculpted body parts (head with jaw, nose and ears, shaped limbs, shoes).
   * A city of distinct buildings: brick, glass offices with setback towers, apartments with balconies, stucco houses. They have shopfronts, awnings, cornices, rooftop units, water tanks and street trees.
   * Volumetric-looking clouds, distant mountain ranges, terrain shading that blends asphalt, concrete slabs, dirt and grass.
   * Wind-swayed grass, organic trees, track flags and tyre stacks, EV chargers and planters at the hub.
@@ -73,7 +76,10 @@ The service worker is only registered in production builds (`npm run build && np
     put back on the shore.
   * Drifting cloud shadows, soft baked shadows under trees and rocks, flocks of birds.
   * At night, per-window city lights and warm pools of light under street lamps.
-  * A speed vignette at high speed.
+  * Post-processing on Medium/High: HDR bloom, a radial speed blur at high speed, colour grading, vignette and dithering.
+  * A glass-fronted Stark Varg showroom at the hub; leaf-clump shading on trees and bushes; surface relief on asphalt,
+    concrete joints and dirt.
+  * A spring-damped chase camera that swings to a three-quarter view during wheelies and stoppies, and widens its view with speed.
 * **Crowds**: about 100 people in the city on two-way sidewalks (walkers, joggers, people window-shopping or on their phones),
   plus cheering spectators at the MX track, stunt park and hub.
   * Mobile-friendly: vegetation is chunked and distance-culled, static bike parts are merged, and adaptive resolution keeps the frame rate up.
@@ -85,12 +91,17 @@ The service worker is only registered in production builds (`npm run build && np
   * Weight transfer that produces wheelies and stoppies.
   * A rider controller that countersteers to reach the lean you ask for.
   * Adjustable assist: balance, lean margin, and rider instincts at the stoppie, loop-out and slide limits.
+  * **Crashes: "Big hits only" (default)**: you only crash when you hit something (a wall, tree, pole) at 30 mph or more, or
+    when you loop out a held wheelie. Leaning, sliding, landings and slow bumps never throw you off; a bike that tips over
+    is stood back up. **Realistic** (Settings → Riding) brings back lowsides, endos and hard-landing crashes.
+  * Wheelie and stoppie buttons work at any speed (the rider pops the front with body weight).
 * **Electric powertrain**:
   * Torque curve with back-EMF fade, controller current and battery power limits.
   * Battery voltage sag and state of charge.
   * Coast and brake regen.
   * Motor thermal model with derating.
-  * Throttle maps, Eco/Standard/Sport modes, traction control and wheelie control.
+  * Throttle maps, Eco/Standard/Sport/Hyper modes, traction control and wheelie control. Hyper unlocks the controller and
+    motor speed, tucks the rider (less drag) and adds launch-grade traction control.
 * **Customization that changes the physics**. Every part feeds `computeVehicleSpec`, and the same spec drives both the
   physics and the procedural 3D model:
   * motor, controller, battery
@@ -176,13 +187,17 @@ npm run deploy        # = npm run build && npx wrangler deploy
 
 ## Tests
 
-* `npm test`: 47 Vitest tests.
+* `npm test`: 54 Vitest tests.
   * Physics scenarios:
     * settling and sag; acceleration and top speed; braking for every preset without flipping
     * turn equilibrium vs. tanφ = v²/(gR); right-steer → right-lean; low-speed U-turn; slaloms at 3 speeds
     * held wheelies; sustained dirt power slides; traction control suppressing slides
     * kicker jump landing; curb climbing; 40 s random-input fuzz (no NaN); crash/reset recovery
-    * trick buttons: a short wheelie hold lifts the front safely, holding too long loops out, the stoppie button lifts the rear
+    * trick buttons: a short wheelie hold lifts the front safely, holding too long loops out, the stoppie button lifts the rear,
+      and the wheelie button works at 50 km/h on every preset
+    * arcade crash rule: full-lock turning at any speed never crashes or lays the bike down; a wall hit below 30 mph is not a
+      crash, above 30 mph head-on it is; Hyper mode passes 180 km/h
+    * the rider mesh builds quickly at a sane size
   * Customization effects:
     * gearing; rear wheel size; knobby vs. street tires
     * battery mass and inertia; spring rate and preload
