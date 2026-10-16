@@ -125,6 +125,9 @@ export class BikeDynamics {
   airTime = 0;
   /** Accumulated pitch/yaw/roll rotation in the current airborne phase (rad). */
   airRot = tv();
+  /** Values of the most recent completed airborne phase. */
+  airTimeLast = 0;
+  airRotLast = tv();
   time = 0;
   events: BikeEvent[] = [];
 
@@ -272,7 +275,7 @@ export class BikeDynamics {
 
     let thr = this.crashed ? 0 : clamp(input.throttle, 0, 1);
     let fb = this.crashed ? 0.3 : clamp(input.frontBrake, 0, 1);
-    const rb = this.crashed ? 0.3 : clamp(input.rearBrake, 0, 1);
+    let rb = this.crashed ? 0.3 : clamp(input.rearBrake, 0, 1);
     const steerIn = this.crashed ? 0 : clamp(input.steer, -1, 1);
     let leanIn = this.crashed ? 0 : clamp(input.lean, -1, 1);
     const grounded = this.front.grounded || this.rear.grounded;
@@ -290,8 +293,12 @@ export class BikeDynamics {
         const excess = predicted - R.stoppieLimit;
         if (excess > 0) fb *= clamp(1 - excess * 7 * this.assist * Math.max(rearLight, 0.4), 0.05, 1);
       }
-      if (this.rear.grounded && !this.front.grounded && this.pitch > R.loopLimit) {
-        thr *= clamp(1 - (this.pitch - R.loopLimit) * 5 * this.assist, 0, 1);
+      if (this.rear.grounded && !this.front.grounded) {
+        // Look ahead on the pitch rate; past the balance point, cover the rear brake.
+        const prUp = -this.angVel.dot(_left);
+        const predicted = this.pitch + Math.max(0, prUp) * 0.25;
+        if (predicted > R.loopLimit) thr *= clamp(1 - (predicted - R.loopLimit) * 6 * this.assist, 0, 1);
+        if (predicted > R.loopLimit + 0.12) rb = Math.max(rb, clamp((predicted - R.loopLimit - 0.12) * 5 * this.assist, 0, 1));
       }
       // Driving out of a turn the rider keeps weight over the front; if the front still goes
       // light while leaned over (and no wheelie was asked for), roll off a little.
@@ -459,6 +466,17 @@ export class BikeDynamics {
       } else {
         _tmp.copy(_left).multiplyScalar(leanIn * R.airPitch);
         torque.add(_tmp);
+        // Rider instinct in the air: keep the bike parallel to the flight path for a clean
+        // landing. Fades out while the player is actively leaning (so flips stay possible).
+        const hv = Math.hypot(this.vel.x, this.vel.z);
+        const path = Math.atan2(this.vel.y, Math.max(hv, 1)) * 0.8;
+        const hands = (1 - Math.abs(leanIn)) * this.assist;
+        if (hands > 0) {
+          const pErr = clamp(this.pitch - path, -0.8, 0.8);
+          // + torque about left = nose down; reduce positive error (nose too high) with nose-down torque.
+          _tmp.copy(_left).multiplyScalar((A.airPitchStiffness * pErr - A.airPitchDamping * pitchRate) * hands);
+          torque.add(_tmp);
+        }
         _tmp.copy(UP).multiplyScalar(-steerIn * R.airYaw);
         torque.add(_tmp);
         const leanErr = clamp(this.lean, -0.8, 0.8);
@@ -502,6 +520,8 @@ export class BikeDynamics {
       this.airRot.z += leanRate * dt;
     } else if (this.airTime > 0) {
       if (this.airTime > 0.25) this.events.push({ type: 'land', strength: this.maxImpact, surface: this.rear.surface });
+      this.airTimeLast = this.airTime;
+      this.airRotLast.copy(this.airRot);
       this.airTime = 0;
       this.airRot.set(0, 0, 0);
       this.maxImpact = 0;

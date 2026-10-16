@@ -1,0 +1,567 @@
+/**
+ * Game: owns the renderer, world, bike, systems and the main loop.
+ * Physics runs at a fixed step (TUNING.dt); rendering interpolates between steps.
+ */
+import {
+  ACESFilmicToneMapping, DirectionalLight, Fog, HemisphereLight, Matrix4, PCFSoftShadowMap, PerspectiveCamera,
+  Quaternion, Scene, SpotLight, SRGBColorSpace, Vector3, WebGLRenderer,
+} from 'three';
+import { BikeDynamics, emptyInput } from '../physics/bike';
+import { TUNING, SURFACE_PROPS } from '../physics/tuning';
+import { computeVehicleSpec } from '../vehicle/spec';
+import type { VehicleSpec } from '../vehicle/spec';
+import type { BikeBuild, RideMode } from '../vehicle/build';
+import { cloneBuild } from '../vehicle/build';
+import { CollisionWorld } from '../world/collision';
+import { generateWorld } from '../world/layout';
+import type { WorldData } from '../world/layout';
+import { WorldView } from '../render/worldView';
+import type { Quality } from '../render/worldView';
+import { BikeModel } from '../render/bikeModel';
+import { Particles, TireMarks } from '../render/effects';
+import { ChaseCamera } from '../camera/chaseCamera';
+import { Input } from '../input/input';
+import { TouchControls } from '../input/touch';
+import { AudioEngine } from '../audio/audio';
+import { Scorer } from '../gameplay/scoring';
+import { CHALLENGES, ChallengeRun } from '../gameplay/challenges';
+import type { ChallengeDef } from '../gameplay/challenges';
+import { Pedestrians } from '../world/pedestrians';
+import { SaveSystem } from '../save/save';
+import type { Settings } from '../save/save';
+import { UI } from '../ui/ui';
+
+export type GameState = 'menu' | 'ride' | 'pause' | 'garage';
+
+const QUALITY: Record<Settings['quality'], Quality> = {
+  low: { shadows: false, shadowSize: 512, trees: 180, pixelRatio: 1, drawDistance: 260 },
+  medium: { shadows: true, shadowSize: 1024, trees: 340, pixelRatio: 1.5, drawDistance: 380 },
+  high: { shadows: true, shadowSize: 2048, trees: 520, pixelRatio: 2, drawDistance: 520 },
+};
+
+const _v = new Vector3(), _v2 = new Vector3(), _m = new Matrix4(), _gl = new Vector3(), _gr = new Vector3();
+
+export class Game {
+  renderer: WebGLRenderer;
+  scene = new Scene();
+  camera = new PerspectiveCamera(62, 1, 0.1, 1200);
+  sun = new DirectionalLight(0xffffff, 2.6);
+  hemi = new HemisphereLight(0xcfe3ff, 0x5a5040, 1.1);
+  headlight = new SpotLight(0xfff2dd, 0, 60, 0.5, 0.45, 1.4);
+  data: WorldData;
+  world: CollisionWorld;
+  view: WorldView;
+  bike: BikeDynamics;
+  model: BikeModel;
+  spec: VehicleSpec;
+  build: BikeBuild;
+  cam: ChaseCamera;
+  input: Input;
+  touch: TouchControls;
+  audio = new AudioEngine();
+  scorer = new Scorer();
+  marks: TireMarks;
+  particles: Particles;
+  peds: Pedestrians;
+  save = new SaveSystem();
+  ui!: UI;
+  state: GameState = 'menu';
+  challenge: ChallengeRun | null = null;
+  headlightOn = true;
+  hudVisible = true;
+  fps = 60;
+  time = 0;
+  private acc = 0;
+  private last = 0;
+  private renderPos = new Vector3();
+  private renderQuat = new Quaternion();
+  private distanceSaveTimer = 0;
+  private launch = { armed: false, t: 0, done: false };
+  private frameTimes: number[] = [];
+  private collected = new Set<string>();
+  quality: Quality = QUALITY.high;
+  onFrame: ((dt: number) => void) | null = null;
+
+  constructor(private container: HTMLElement) {
+    this.renderer = new WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.renderer.outputColorSpace = SRGBColorSpace;
+    this.renderer.toneMapping = ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    container.appendChild(this.renderer.domElement);
+    this.renderer.domElement.className = 'game-canvas';
+    this.input = new Input(this.renderer.domElement);
+    this.touch = new TouchControls(this.input, container);
+    this.data = generateWorld();
+    this.world = new CollisionWorld(this.data.terrain);
+    for (const b of this.data.boxes) this.world.addBox(b);
+    this.view = new WorldView(this.data, this.quality);
+    this.scene.add(this.view.root);
+    this.scene.add(this.sun, this.sun.target, this.hemi);
+    this.scene.fog = new Fog(0xcfe3f2, 120, 520);
+    this.build = cloneBuild(this.save.selectedBuild);
+    this.spec = computeVehicleSpec(this.build);
+    this.bike = new BikeDynamics(this.spec, this.world);
+    this.model = new BikeModel(this.build, this.spec);
+    this.scene.add(this.model.root, this.model.rider.root);
+    this.scene.add(this.headlight);
+    this.marks = new TireMarks(this.scene);
+    this.particles = new Particles(this.scene);
+    this.peds = new Pedestrians(this.data.pedPaths, 36, (x, z) => this.world.groundHeight(x, z, 1.5));
+    this.scene.add(this.peds.root);
+    this.cam = new ChaseCamera(this.camera, this.world);
+    window.addEventListener('resize', () => this.resize());
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        if (this.state === 'ride') this.setState('pause');
+        this.audio.suspend();
+        this.save.save();
+      } else this.audio.resume();
+    });
+    this.resize();
+  }
+
+  async init() {
+    await this.save.load();
+    this.ui = new UI(this);
+    this.build = cloneBuild(this.save.selectedBuild);
+    this.applyBuild(this.build, false);
+    this.applySettings();
+    this.collected = new Set(this.save.data.progress.collected);
+    this.view.setCollected(this.collected);
+    this.respawn('hub');
+    this.setState('menu');
+    if (this.save.warning) this.ui.toast(this.save.warning, 6000);
+    requestAnimationFrame(this.frame);
+  }
+
+  get settings() {
+    return this.save.data.settings;
+  }
+
+  applySettings() {
+    const s = this.settings;
+    this.quality = QUALITY[s.quality];
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.quality.pixelRatio));
+    this.renderer.shadowMap.enabled = this.quality.shadows;
+    this.sun.castShadow = this.quality.shadows;
+    this.sun.shadow.mapSize.set(this.quality.shadowSize, this.quality.shadowSize);
+    this.sun.shadow.map?.dispose();
+    (this.sun.shadow as { map: unknown }).map = null;
+    const sc = this.sun.shadow.camera;
+    sc.left = sc.bottom = -35;
+    sc.right = sc.top = 35;
+    sc.near = 1;
+    sc.far = 200;
+    sc.updateProjectionMatrix();
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.03;
+    this.particles.budget = s.quality === 'low' ? 0.4 : s.quality === 'medium' ? 0.75 : 1;
+    this.peds.setCount(s.pedestrians ? (s.quality === 'low' ? 12 : s.quality === 'medium' ? 24 : 36) : 0);
+    this.camera.far = this.quality.drawDistance + 400;
+    (this.scene.fog as Fog).far = this.quality.drawDistance;
+    (this.scene.fog as Fog).near = this.quality.drawDistance * 0.25;
+    this.bike.assist = s.assist;
+    this.bike.pt.drain = s.drain;
+    this.bike.pt.mode = s.rideMode;
+    this.cam.distance = s.camDistance;
+    this.cam.sensitivity = s.camSensitivity;
+    this.input.steerSensitivity = s.steerSensitivity;
+    this.input.bindings = this.save.data.bindings;
+    this.audio.volumes = { master: s.master, motor: s.motor, sfx: s.sfx, ambience: s.ambience };
+    this.audio.applyVolumes();
+    this.touch.setLeftHanded(s.leftHanded);
+    this.setTimeOfDay(s.timeOfDay);
+    this.updateTouchVisibility();
+    this.resize();
+  }
+
+  updateTouchVisibility() {
+    const t = this.settings.touchControls;
+    const coarse = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+    const show = this.state === 'ride' && (t === 'on' || (t === 'auto' && (coarse || this.input.lastDevice === 'touch')));
+    this.touch.setVisible(show);
+  }
+
+  setTimeOfDay(mode: Settings['timeOfDay']) {
+    const dir = mode === 'day' ? new Vector3(0.45, 0.85, 0.3) : mode === 'sunset' ? new Vector3(-0.8, 0.18, 0.4) : new Vector3(0.3, 0.5, -0.4);
+    dir.normalize();
+    this.view.setTimeOfDay(mode, dir);
+    this.sunDir.copy(dir);
+    const fog = this.scene.fog as Fog;
+    if (mode === 'day') {
+      this.sun.color.set(0xfff4e0); this.sun.intensity = 2.6;
+      this.hemi.color.set(0xcfe3ff); this.hemi.groundColor.set(0x5a5040); this.hemi.intensity = 1.1;
+      fog.color.set(0xcfe3f2); this.renderer.toneMappingExposure = 1.0;
+    } else if (mode === 'sunset') {
+      this.sun.color.set(0xffa860); this.sun.intensity = 2.0;
+      this.hemi.color.set(0x8d8fb8); this.hemi.groundColor.set(0x4a3a30); this.hemi.intensity = 0.8;
+      fog.color.set(0xd9a477); this.renderer.toneMappingExposure = 1.05;
+    } else {
+      this.sun.color.set(0x8fa6d6); this.sun.intensity = 0.35;
+      this.hemi.color.set(0x334466); this.hemi.groundColor.set(0x111318); this.hemi.intensity = 0.35;
+      fog.color.set(0x0b0f18); this.renderer.toneMappingExposure = 1.15;
+    }
+    this.headlight.intensity = mode === 'night' ? 60 * this.spec.headlight : mode === 'sunset' ? 18 * this.spec.headlight : 0;
+    this.headlight.visible = this.headlight.intensity > 0;
+  }
+  private sunDir = new Vector3(0.45, 0.85, 0.3).normalize();
+
+  /** Switch the active bike to a build (updates physics and model, keeps position). */
+  applyBuild(b: BikeBuild, keepPose = true) {
+    this.build = cloneBuild(b);
+    this.spec = computeVehicleSpec(this.build);
+    this.bike.setSpec(this.spec);
+    this.bike.assist = this.settings.assist;
+    this.bike.pt.drain = this.settings.drain;
+    this.bike.pt.mode = this.settings.rideMode;
+    this.model.rebuild(this.build, this.spec);
+    this.setTimeOfDay(this.settings.timeOfDay);
+    if (keepPose) this.bike.place(this.bike.pos.x, this.bike.pos.z, this.bike.yaw, this.bike.pos.y);
+  }
+
+  respawn(where: string) {
+    const s = this.data.spawns[where] ?? this.data.spawns.hub;
+    this.bike.place(s.x, s.z, s.yaw);
+    this.cam.snap();
+    this.marks.clear();
+    this.particles.clear();
+    this.scorer.reset();
+    this.launch = { armed: false, t: 0, done: false };
+  }
+
+  setState(s: GameState) {
+    const prev = this.state;
+    this.state = s;
+    this.input.enabled = s === 'ride';
+    this.input.clearEdges();
+    if (s === 'ride' && prev !== 'ride') {
+      this.acc = 0;
+      this.audio.resume();
+    }
+    this.updateTouchVisibility();
+    this.ui?.onState(s, prev);
+  }
+
+  startChallenge(def: ChallengeDef) {
+    this.respawn(def.spawn);
+    this.challenge = new ChallengeRun(def, { bike: this.bike, data: this.data, scorer: this.scorer, view: this.view });
+    this.setState('ride');
+  }
+
+  endChallenge() {
+    this.challenge = null;
+  }
+
+  resize() {
+    const w = this.container.clientWidth || window.innerWidth;
+    const h = this.container.clientHeight || window.innerHeight;
+    this.renderer.setSize(w, h);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.particles.setViewport(h * this.renderer.getPixelRatio());
+    this.ui?.garage?.resize(w, h);
+  }
+
+  private frame = (tms: number) => {
+    requestAnimationFrame(this.frame);
+    const now = tms / 1000;
+    let dt = this.last ? now - this.last : 1 / 60;
+    this.last = now;
+    if (dt > 0.1) dt = 0.1;
+    this.frameTimes.push(dt);
+    if (this.frameTimes.length > 30) this.frameTimes.shift();
+    this.fps = this.frameTimes.length / this.frameTimes.reduce((a, b) => a + b, 0);
+    this.time += dt;
+    if (this.state === 'garage') {
+      this.ui.garage.update(dt);
+      this.ui.garage.render(this.renderer);
+      return;
+    }
+    this.input.update(dt, this.bike.speed);
+    if (this.state === 'ride') this.rideUpdate(dt);
+    else if (this.state === 'menu') this.menuUpdate(dt);
+    this.renderer.render(this.scene, this.camera);
+    this.onFrame?.(dt);
+  };
+
+  private menuUpdate(dt: number) {
+    // Idle bike with a slow orbiting camera behind the menu.
+    this.bike.step(emptyInput());
+    this.syncModel(1);
+    const a = this.time * 0.15;
+    const p = this.renderPos;
+    this.camera.position.set(p.x + Math.sin(a) * 5, p.y + 1.4, p.z + Math.cos(a) * 5);
+    this.camera.lookAt(p.x, p.y + 0.3, p.z);
+    this.updateEnvironment(dt);
+    this.audio.update({ rpm: 0, load: 0, speed: 0, slip: 0, surface: 'concrete', grounded: true, distance: 6, whine: 1, pwm: 1, city: 0.6, paused: true }, dt);
+  }
+
+  private rideUpdate(dt: number) {
+    const inp = this.input;
+    if (inp.consume('pause')) return this.setState('pause');
+    if (inp.consume('garage')) {
+      this.ui.openGarage();
+      return;
+    }
+    if (inp.consume('reset')) {
+      this.bike.reset();
+      this.cam.snap();
+    }
+    if (inp.consume('camera')) {
+      this.cam.cycle();
+      this.ui.toast(`Camera: ${this.cam.mode}`);
+    }
+    if (inp.consume('mode')) {
+      const modes: RideMode[] = ['eco', 'standard', 'sport'];
+      const m = modes[(modes.indexOf(this.bike.pt.mode) + 1) % 3];
+      this.bike.pt.mode = m;
+      this.settings.rideMode = m;
+      this.save.save();
+      this.ui.toast(`Ride mode: ${m.toUpperCase()}`);
+    }
+    if (inp.consume('hud')) this.hudVisible = !this.hudVisible;
+    if (inp.consume('lights')) {
+      this.headlightOn = !this.headlightOn;
+      this.ui.toast(`Headlight ${this.headlightOn ? 'on' : 'off'}`);
+    }
+    const o = inp.readOrbit();
+    this.cam.orbit(o.dx, o.dy, o.wheel);
+    if (o.wheel) {
+      this.settings.camDistance = this.cam.distance;
+    }
+
+    // --- Fixed-step physics ---
+    this.acc += dt;
+    let steps = 0;
+    const bInput = { ...inp.state };
+    while (this.acc >= TUNING.dt && steps < 40) {
+      this.bike.step(bInput);
+      this.acc -= TUNING.dt;
+      steps++;
+    }
+    if (steps >= 40) this.acc = 0;
+    const alpha = this.acc / TUNING.dt;
+    this.syncModel(alpha);
+
+    // Events
+    for (const e of this.bike.events) {
+      if (e.type === 'land') {
+        this.audio.impact(Math.min(1, e.strength / 4 + 0.2), 'land', e.surface);
+        this.cam.bump(Math.min(0.6, e.strength / 8));
+        const p = this.bike.rear.contact;
+        const c = SURFACE_PROPS[e.surface];
+        for (let i = 0; i < 14 * c.dust; i++) {
+          this.particles.emit(p, _v.set((Math.random() - 0.5) * 3, Math.random() * 1.2, (Math.random() - 0.5) * 3), c.color, 0.5, 1.2, { grow: 1.4, drag: 2 });
+        }
+      } else if (e.type === 'bump') this.audio.impact(e.strength * 0.5, 'bump', this.bike.front.surface);
+      else if (e.type === 'scrape') this.audio.impact(e.strength * 0.3, 'scrape');
+      else if (e.type === 'crash') {
+        this.audio.impact(1, 'crash');
+        this.cam.bump(0.8);
+        this.ui.toast('Crashed! Press R / ⟲ to reset (auto in 3 s)', 2500);
+      }
+    }
+    this.bike.events.length = 0;
+    if (this.bike.wantsReset) {
+      this.bike.reset();
+      this.cam.snap();
+    }
+
+    // Systems
+    this.scorer.update(dt, this.bike);
+    if (this.challenge) this.challenge.update(dt, { bike: this.bike, data: this.data, scorer: this.scorer, view: this.view });
+    this.effects(dt);
+    this.gameplayChecks(dt);
+    this.updateEnvironment(dt);
+    _v.copy(this.renderPos);
+    this.cam.update(dt, this.renderPos, this.renderQuat, this.bike.vel, this.helmetPos(_v2), this.bike.crashed);
+    const b = this.bike;
+    const pt = b.pt;
+    this.audio.update({
+      rpm: pt.rpm,
+      load: pt.torque / Math.max(1, b.spec.powertrain.peakTorque),
+      speed: Math.hypot(b.vel.x, b.vel.z),
+      slip: Math.max(b.rear.slide, b.front.slide * 1.2) * (b.rear.slipSpeed > 1.5 ? 1 : 0),
+      surface: b.rear.surface,
+      grounded: b.rear.grounded || b.front.grounded,
+      distance: this.camera.position.distanceTo(this.renderPos),
+      whine: 1,
+      pwm: b.spec.powertrain.pwmTone,
+      city: this.renderPos.x < -30 && Math.abs(this.renderPos.z) < 200 ? 1 : 0,
+      paused: false,
+    }, dt);
+    this.ui.hud.update(dt);
+  }
+
+  private helmetPos(out: Vector3) {
+    const h = this.spec.bodyPoints.find((p) => p.name === 'head')!.p;
+    return out.set(h.x, h.y - 0.05, h.z + 0.08).applyQuaternion(this.renderQuat).add(this.renderPos);
+  }
+
+  /** Copy interpolated physics state into the render model. */
+  private syncModel(alpha: number) {
+    const b = this.bike;
+    this.renderPos.lerpVectors(b.prevPos, b.pos, alpha);
+    this.renderQuat.slerpQuaternions(b.prevQuat, b.quat, alpha);
+    this.model.root.position.copy(this.renderPos);
+    this.model.root.quaternion.copy(this.renderQuat);
+    this.model.update({
+      steer: b.steer, frontComp: b.front.compression, rearComp: b.rear.compression, frontAngle: b.front.angle, rearAngle: b.rear.angle,
+      riderShift: b.riderShift, riderLat: b.riderLat, speed: b.speed, brake: Math.max(b.input.frontBrake, b.input.rearBrake), crashed: b.crashed,
+      headlight: this.headlightOn,
+    });
+    this.model.root.updateMatrixWorld(true);
+    if (b.crashed) {
+      this.model.rider.tumble(b.rider.pos, b.rider.rot);
+    } else {
+      this.model.gripPositions(_gl, _gr);
+      _m.copy(this.model.chassisGroup.matrixWorld);
+      this.model.rider.pose(this.spec, _m, _gl, _gr, b.riderShift, b.riderLat, b.speed);
+    }
+    this.model.lightAnchor.getWorldPosition(this.headlight.position);
+    this.headlight.target = this.model.lightTarget;
+    this.headlight.visible = this.headlightOn && this.headlight.intensity > 0;
+  }
+
+  private effects(dt: number) {
+    const b = this.bike;
+    this.marks.fade(dt);
+    for (const [key, w, spec] of [['f', b.front, this.spec.front], ['r', b.rear, this.spec.rear]] as const) {
+      const sp = SURFACE_PROPS[w.surface];
+      const sliding = w.grounded ? Math.min(1, Math.max(0, w.slide - 0.15) * 1.4 + (w.slipSpeed > 3 ? 0.3 : 0)) : 0;
+      const loose = w.surface !== 'asphalt' && w.surface !== 'concrete';
+      const intensity = sp.marks ? (loose ? Math.min(0.8, 0.25 + sliding) * (w.grounded && Math.abs(b.speed) > 1 ? 1 : 0) : sliding * 0.8) : 0;
+      _v.set(1, 0, 0).applyQuaternion(this.renderQuat);
+      const col: [number, number, number] = loose ? [sp.color[0] * 0.55, sp.color[1] * 0.5, sp.color[2] * 0.45] : [0.05, 0.05, 0.05];
+      this.marks.add(key, w.contact, _v, spec.width * 0.9, w.grounded ? intensity : 0, col);
+      if (!w.grounded) continue;
+      // Smoke on tarmac, dust/roost on loose ground.
+      if (!loose && w.slipSpeed > 3 && w.slide > 0.3) {
+        const n = Math.min(3, w.slipSpeed / 4);
+        for (let i = 0; i < n; i++) {
+          this.particles.emit(w.contact, _v2.set((Math.random() - 0.5) * 1.5, 0.6 + Math.random(), (Math.random() - 0.5) * 1.5), [0.85, 0.85, 0.88], 0.6, 1.8 + Math.random(), { grow: 2.2, drag: 1.2, alpha: 0.55 });
+        }
+      } else if (loose && (Math.abs(b.speed) > 4 || w.slipSpeed > 2)) {
+        const amt = sp.dust * (Math.abs(b.speed) / 15 + w.slipSpeed / 6) * dt * 40;
+        for (let i = 0; i < Math.min(4, amt); i++) {
+          this.particles.emit(w.contact, _v2.set((Math.random() - 0.5) * 1.2, 0.3 + Math.random() * 0.8, (Math.random() - 0.5) * 1.2), sp.color, 0.45, 1.6, { grow: 1.8, drag: 1.6, alpha: 0.45 });
+        }
+        if (key === 'r' && w.slipSpeed > 2.5) {
+          _v.set(0, 0, -1).applyQuaternion(this.renderQuat);
+          for (let i = 0; i < 2; i++) {
+            this.particles.emit(w.contact, _v2.copy(_v).multiplyScalar(3 + w.slipSpeed * 0.6).add(new Vector3((Math.random() - 0.5) * 2, 2 + Math.random() * 2, (Math.random() - 0.5) * 2)), [sp.color[0] * 0.7, sp.color[1] * 0.6, sp.color[2] * 0.5], 0.12, 0.8, { grow: 0.1, drag: 0.3, gravity: 9, alpha: 0.9 });
+          }
+        }
+      }
+    }
+    this.particles.update(dt);
+  }
+
+  private gameplayChecks(dt: number) {
+    const b = this.bike;
+    const p = b.pos;
+    // Collectibles
+    for (const c of this.data.collectibles) {
+      if (this.collected.has(c.id)) continue;
+      const gy = this.data.terrain.heightAt(c.x, c.z) + 1.3;
+      if ((p.x - c.x) ** 2 + (p.z - c.z) ** 2 < 4 && Math.abs(p.y - gy) < 2.5) {
+        this.collected.add(c.id);
+        this.save.data.progress.collected = [...this.collected];
+        this.view.setCollected(this.collected);
+        this.audio.chime(true);
+        const n = this.collected.size;
+        this.ui.toast(`Charge core ${n}/${this.data.collectibles.length}`);
+        const unlocked = this.ui.unlockMessages(n);
+        for (const u of unlocked) this.ui.toast(u, 4000);
+        this.save.save();
+      }
+    }
+    this.view.updateCores(this.time);
+    // Cones
+    const knocked = this.view.hitCones(p.x, p.z, b.vel.x, b.vel.z);
+    if (knocked) this.audio.impact(0.2, 'bump', 'asphalt');
+    this.view.updateCones(dt);
+    // Pedestrians
+    if (this.settings.pedestrians && Math.abs(p.x + 200) < 260) {
+      if (this.peds.update(dt, p.x, p.z, b.vel.x, b.vel.z, this.time)) {
+        this.ui.toast('Watch out for pedestrians!');
+        b.vel.multiplyScalar(0.85);
+      }
+    }
+    // Auto-measured launch: 0–50 km/h from a standstill (free roam)
+    const kmh = b.speed * 3.6;
+    if (!this.launch.armed && Math.abs(b.speed) < 0.3 && b.front.grounded && b.rear.grounded) this.launch = { armed: true, t: 0, done: false };
+    if (this.launch.armed) {
+      if (b.speed > 0.3) this.launch.t += dt;
+      if (b.crashed || b.input.frontBrake > 0.3) this.launch.armed = false;
+      if (kmh >= 50 && this.launch.t > 0) {
+        const id = this.build.id;
+        const rec = (this.save.data.progress.measured[id] ??= {});
+        if (!rec.t0to50 || this.launch.t < rec.t0to50) {
+          rec.t0to50 = this.launch.t;
+          rec.at = Date.now();
+          this.ui.toast(`Measured 0–50 km/h: ${this.launch.t.toFixed(2)} s (best)`);
+          this.save.save();
+        }
+        this.launch.armed = false;
+      }
+    }
+    // Distance / save progress periodically
+    this.distanceSaveTimer += dt;
+    if (this.distanceSaveTimer > 10) {
+      this.distanceSaveTimer = 0;
+      this.save.data.progress.distance = b.distance;
+      this.save.data.progress.bestDrift = Math.max(this.save.data.progress.bestDrift, Math.round(this.scorer.bestDrift));
+      this.save.save();
+    }
+    // Challenge completion bookkeeping
+    const ch = this.challenge;
+    if (ch && (ch.state === 'done' || ch.state === 'failed') && !ch.extra.__reported) {
+      ch.extra.__reported = 1;
+      this.ui.challengeResult(ch);
+      if (ch.state === 'done') {
+        const prev = this.save.data.progress.medals[ch.def.id];
+        const better = !prev || (ch.def.lowerIsBetter ? ch.result < prev.best : ch.result > prev.best);
+        if (better) this.save.data.progress.medals[ch.def.id] = { best: ch.result, medal: ch.medal, buildName: this.build.name };
+        const rec = (this.save.data.progress.measured[this.build.id] ??= {});
+        if (ch.def.id === 'drag') {
+          if (ch.extra.t50 !== undefined && (!rec.t0to50 || ch.extra.t50 < rec.t0to50)) rec.t0to50 = ch.extra.t50;
+          if (ch.extra.t80 !== undefined && (!rec.t0to80 || ch.extra.t80 < rec.t0to80)) rec.t0to80 = ch.extra.t80;
+          if (ch.extra.top !== undefined) rec.topSpeed = Math.max(rec.topSpeed ?? 0, ch.extra.top * 3.6);
+        }
+        if (ch.def.id === 'brake' && (!rec.brake50 || ch.result < rec.brake50)) rec.brake50 = ch.result;
+        rec.at = Date.now();
+        if (ch.medal) this.audio.chime(true);
+        for (const u of this.ui.unlockMessages(this.collected.size)) this.ui.toast(u, 4000);
+        this.save.save();
+      }
+    }
+  }
+
+  private updateEnvironment(_dt: number) {
+    // Shadow camera follows the bike.
+    const p = this.renderPos;
+    this.sun.position.copy(p).addScaledVector(this.sunDir, 80);
+    this.sun.target.position.copy(p);
+    this.view.sky.position.copy(this.camera.position);
+  }
+
+  get challenges() {
+    return CHALLENGES;
+  }
+
+  /** Recompute whether a part unlock key is satisfied. */
+  isUnlocked(key?: string) {
+    if (!key) return true;
+    const m = /^(cores|medal)(\d+)$/.exec(key);
+    if (!m) return true;
+    const n = Number(m[2]);
+    if (m[1] === 'cores') return this.collected.size >= n;
+    return Object.values(this.save.data.progress.medals).filter((x) => x.medal).length >= n;
+  }
+
+  get collectedCount() {
+    return this.collected.size;
+  }
+}

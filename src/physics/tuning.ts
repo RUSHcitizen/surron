@@ -88,6 +88,9 @@ export const TUNING = {
     slideRollStiffness: 900,
     slideRollDamping: 160,
     airRollStiffness: 160,
+    /** In-air pitch levelling toward the flight path (scaled by assist, off while leaning). */
+    airPitchStiffness: 420,
+    airPitchDamping: 160,
     airRollDamping: 40,
   },
 
@@ -104,7 +107,7 @@ export const TUNING = {
     /** Pitch (rad) at which the rider instinctively eases the front brake / throttle. */
     stoppieLimit: 0.12,
     stoppieLookahead: 0.3,
-    loopLimit: 0.6,
+    loopLimit: 0.55,
     /** Rear slip ratio a rider lets the tire reach at full assist. */
     spinLimit: 0.35,
     /** Rear slip angle (rad) past which the rider rolls off to stay within steering lock. */

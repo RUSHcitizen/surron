@@ -172,7 +172,7 @@ export class CollisionWorld {
   /** Highest walkable surface (terrain or box top) at x,z — used for spawning. */
   groundHeight(x: number, z: number, fromY = 200): number {
     const hit = makeHit();
-    if (this.raycast(new Vector3(x, fromY, z), new Vector3(0, -1, 0), fromY + 60, hit, true)) return hit.point.y;
+    if (this.raycast(new Vector3(x, fromY, z), new Vector3(0, -1, 0), fromY + 60, hit, true, 'pole')) return hit.point.y;
     return this.terrain.heightAt(x, z);
   }
 
@@ -180,7 +180,7 @@ export class CollisionWorld {
    * Raycast against terrain and boxes. Rays that start inside a box ignore that box
    * (the penetration query handles embedded points). Returns true on hit.
    */
-  raycast(origin: Vector3, dir: Vector3, maxDist: number, out: Hit, ignoreInside = true): boolean {
+  raycast(origin: Vector3, dir: Vector3, maxDist: number, out: Hit, ignoreInside = true, skipTag?: string): boolean {
     let best = maxDist;
     let found = false;
     // Terrain: march + bisection.
@@ -207,7 +207,8 @@ export class CollisionWorld {
         const ft = f(t);
         if (ft <= 0) {
           let lo = tPrev, hi = t;
-          for (let k = 0; k < 10; k++) {
+          const iters = Math.min(24, Math.max(8, Math.ceil(Math.log2(dt / 0.002))));
+          for (let k = 0; k < iters; k++) {
             const mid = (lo + hi) * 0.5;
             if (f(mid) > 0) lo = mid; else hi = mid;
           }
@@ -226,6 +227,7 @@ export class CollisionWorld {
     // Boxes
     const ex = origin.x + dir.x * maxDist, ez = origin.z + dir.z * maxDist;
     this.forBoxes(origin.x, origin.z, ex, ez, 1, (b) => {
+      if (skipTag && b.tag === skipTag) return;
       _l.copy(origin).sub(b.center).applyMatrix3(b.inv);
       _d.copy(dir).applyMatrix3(b.inv);
       let tmin = -Infinity, tmax = Infinity;
