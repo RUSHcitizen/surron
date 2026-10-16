@@ -13,10 +13,12 @@ import type { BikeBuild } from '../vehicle/build';
 import type { VehicleSpec, V3 } from '../vehicle/spec';
 import { BODY_KITS, COOLING, DAMPERS, FENDERS, FINISHES, HANDGUARDS, LIGHTS, PEGS, RIM_STYLES, byId } from '../vehicle/parts';
 import { liveryTexture, plateTexture, treadTexture } from './textures';
+import { RiderModel } from './rider';
+export { RiderModel };
 
 const v = (p: V3) => new Vector3(p.x, p.y, p.z);
 const UPY = new Vector3(0, 1, 0);
-const _a = new Vector3(), _b = new Vector3(), _c = new Vector3(), _q = new Quaternion(), _bt = new Vector3();
+const _a = new Vector3(), _b = new Vector3(), _c = new Vector3(), _bt = new Vector3();
 
 export interface BikeVisualState {
   steer: number;
@@ -98,19 +100,6 @@ class Helix extends Curve<Vector3> {
   }
 }
 
-function twoBoneIK(a: Vector3, c: Vector3, l1: number, l2: number, hint: Vector3, out: Vector3) {
-  const dir = _a.subVectors(c, a);
-  let d = dir.length();
-  if (d < 1e-5) return out.copy(a).addScaledVector(hint, l1);
-  dir.multiplyScalar(1 / d);
-  d = Math.min(d, (l1 + l2) * 0.999);
-  const x = (l1 * l1 - l2 * l2 + d * d) / (2 * d);
-  const h = Math.sqrt(Math.max(0, l1 * l1 - x * x));
-  const p = _b.copy(hint).addScaledVector(dir, -hint.dot(dir));
-  if (p.lengthSq() < 1e-8) p.set(0, 1, 0);
-  p.normalize();
-  return out.copy(a).addScaledVector(dir, x).addScaledVector(p, h);
-}
 
 export class BikeModel {
   root = new Group();
@@ -692,172 +681,6 @@ export class BikeModel {
 }
 
 /** Nominal limb lengths (m); capsules are built at these lengths and stretched slightly by IK. */
-const LIMB = { uarm: 0.3, farm: 0.3, thigh: 0.44, shin: 0.46, torso: 0.5 };
-
-/** Rider with smooth capsule limbs and an MX helmet, posed by IK. Lives in the scene separately so it can detach on crashes. */
-export class RiderModel {
-  root = new Group();
-  private parts: Record<string, Object3D> = {};
-  private helmet = new Group();
-  private disposables: (BufferGeometry | Material)[] = [];
-  private tmp = { hip: new Vector3(), neck: new Vector3(), head: new Vector3(), sh: [new Vector3(), new Vector3()], el: [new Vector3(), new Vector3()], kn: [new Vector3(), new Vector3()], hipS: [new Vector3(), new Vector3()], v: new Vector3(), w: new Vector3() };
-
-  constructor(build: BikeBuild) {
-    this.rebuild(build);
-  }
-
-  rebuild(build: BikeBuild) {
-    this.dispose();
-    const R = build.rider ?? { helmet: 'mx', helmetColor: build.visual.plasticColor, helmetAccent: build.visual.accentColor, jerseyColor: build.visual.accentColor, pantsColor: '#23262d', bootColor: '#e9ebee', gloveColor: '#141619' };
-    const jersey = new MeshStandardMaterial({ color: R.jerseyColor, roughness: 0.75 });
-    const pants = new MeshStandardMaterial({ color: R.pantsColor, roughness: 0.8 });
-    const shell = new MeshPhysicalMaterial({ color: R.helmetColor, roughness: 0.3, metalness: 0.1, clearcoat: 1, clearcoatRoughness: 0.08 });
-    const trim = new MeshStandardMaterial({ color: R.helmetAccent, roughness: 0.4 });
-    const lens = new MeshPhysicalMaterial({ color: 0x0c1016, roughness: 0.05, metalness: 0.9, clearcoat: 1 });
-    const black = new MeshStandardMaterial({ color: R.gloveColor, roughness: 0.6 });
-    const strapM = new MeshStandardMaterial({ color: 0x141619, roughness: 0.6 });
-    const boot = new MeshStandardMaterial({ color: R.bootColor, roughness: 0.5 });
-    this.disposables.push(jersey, pants, shell, trim, lens, black, strapM, boot);
-    const G = <T extends BufferGeometry>(g: T) => (this.disposables.push(g), g);
-    const add = (name: string, geo: BufferGeometry, m: Material, parent: Object3D = this.root) => {
-      const mesh = new Mesh(geo, m);
-      mesh.castShadow = true;
-      this.parts[name] = mesh;
-      parent.add(mesh);
-      return mesh;
-    };
-    // Capsule of total length L (caps included) along Y, centred.
-    const cap = (r: number, L: number) => G(new CapsuleGeometry(r, Math.max(0.01, L - 2 * r), 6, 14));
-    const torso = add('torso', cap(0.15, LIMB.torso), jersey);
-    torso.scale.set(1.12, 1, 0.82);
-    add('pelvis', cap(0.13, 0.36), pants);
-    for (const s of ['L', 'R']) {
-      add('uarm' + s, cap(0.05, LIMB.uarm), jersey);
-      add('farm' + s, cap(0.044, LIMB.farm), jersey);
-      add('glove' + s, G(new SphereGeometry(0.048, 14, 10)), black);
-      add('thigh' + s, cap(0.072, LIMB.thigh), pants);
-      add('shin' + s, cap(0.064, LIMB.shin), boot);
-      add('foot' + s, cap(0.052, 0.26), boot);
-    }
-    // Helmet: shell plus style-specific chin bar, peak, goggles or visor.
-    add('shell', G(new SphereGeometry(0.14, 28, 20)), shell, this.helmet).scale.set(1, 1.04, 1.12);
-    const stripe = add('stripe', G(new TorusGeometry(0.143, 0.022, 6, 32, Math.PI * 1.1)), trim, this.helmet);
-    stripe.rotation.set(0, Math.PI / 2, -Math.PI * 0.05);
-    stripe.scale.set(1.12, 1.04, 1);
-    if (R.helmet !== 'trail') {
-      const chin = add('chin', G(new TorusGeometry(0.105, 0.035, 10, 24, Math.PI * 0.9)), shell, this.helmet);
-      chin.rotation.set(Math.PI / 2 + 0.35, 0, Math.PI * 0.05);
-      chin.position.set(0, -0.07, 0.03);
-    }
-    if (R.helmet === 'full') {
-      // Tinted visor across the face.
-      const visor = add('visor', G(new SphereGeometry(0.147, 24, 10, Math.PI * 0.18, Math.PI * 0.64, Math.PI * 0.4, Math.PI * 0.2)), lens, this.helmet);
-      visor.scale.set(1, 1.04, 1.12);
-    } else {
-      const peak = add('peak', G(sideExtrude(roundedShape(R.helmet === 'mx' ? [[0.26, 0.05], [0.24, 0.02], [0.04, 0.0], [0.05, 0.05]] : [[0.2, 0.04], [0.19, 0.02], [0.04, 0.0], [0.05, 0.04]], 0.02), 0.2, 0.01)), trim, this.helmet);
-      peak.position.set(0, 0.035, -0.02);
-      peak.rotation.x = -0.18;
-      const gog = add('goggles', G(new CapsuleGeometry(0.035, 0.12, 4, 12)), lens, this.helmet);
-      gog.rotation.z = Math.PI / 2;
-      gog.position.set(0, 0.0, 0.135);
-      const strap = add('strap', G(new TorusGeometry(0.145, 0.012, 6, 32)), strapM, this.helmet);
-      strap.scale.set(1, 1, 1.1);
-    }
-    this.root.add(this.helmet);
-  }
-
-  dispose() {
-    for (const d of this.disposables) d.dispose();
-    this.disposables = [];
-    this.root.clear();
-    this.helmet = new Group();
-    this.parts = {};
-  }
-
-  private limb(name: string, a: Vector3, b: Vector3, nominal: number) {
-    between(this.parts[name], a, b, 1, nominal);
-    // Keep the radial scale of pre-scaled parts (torso).
-    if (name === 'torso') this.parts[name].scale.set(1.12, this.parts[name].scale.y, 0.82);
-  }
-
-  /** Place a boot along the foot direction (toes forward along +z of the bike). */
-  private foot(name: string, ankle: Vector3) {
-    const f = this.parts[name];
-    f.position.copy(ankle).add(this.tmp.w.set(0, -0.02, 0.07));
-    f.rotation.set(Math.PI / 2, 0, 0);
-  }
-
-  /**
-   * Pose in the bike's chassis frame, then transform into world via `chassisWorld`.
-   * hip/grips/pegs are chassis-local.
-   */
-  pose(spec: VehicleSpec, chassisWorld: Matrix4, gripL: Vector3, gripR: Vector3, shift: number, lat: number, speed: number) {
-    const G = spec.geo;
-    const t = this.tmp;
-    const crouch = Math.min(1, Math.abs(speed) / 18);
-    t.hip.set(G.riderHip.x + lat * 0.07, G.riderHip.y + 0.04 + shift * -0.03, G.riderHip.z + shift * 0.12);
-    // Torso leans toward the bars, more when crouched/shifted forward
-    const pitch = 0.45 + crouch * 0.25 + shift * 0.35;
-    const roll = lat * 0.25;
-    t.neck.set(Math.sin(roll) * 0.5 + t.hip.x, t.hip.y + Math.cos(pitch) * 0.5, t.hip.z + Math.sin(pitch) * 0.5);
-    t.head.copy(t.neck).add(t.v.set(0, 0.15, 0.07));
-    const P = this.parts;
-    this.limb('torso', t.hip, t.neck, LIMB.torso);
-    P.pelvis.position.copy(t.hip);
-    P.pelvis.rotation.set(0, 0, Math.PI / 2);
-    this.helmet.position.copy(t.head);
-    // Eyes up the trail: the head pitches back against the torso lean.
-    this.helmet.rotation.set(-(pitch - 0.5) * 0.4, 0, roll * 0.5);
-    const grips = [gripL, gripR];
-    for (let i = 0; i < 2; i++) {
-      const s = i === 0 ? 1 : -1;
-      const S = i === 0 ? 'L' : 'R';
-      t.sh[i].copy(t.neck).add(t.v.set(s * 0.19, -0.07, -0.02));
-      twoBoneIK(t.sh[i], grips[i], LIMB.uarm, LIMB.farm, t.w.set(s * 0.8, -0.5, -0.4), t.el[i]);
-      this.limb('uarm' + S, t.sh[i], t.el[i], LIMB.uarm);
-      this.limb('farm' + S, t.el[i], grips[i], LIMB.farm);
-      P['glove' + S].position.copy(grips[i]);
-      t.hipS[i].copy(t.hip).add(t.v.set(s * 0.11, 0, 0));
-      const peg = t.v.set(s * (G.peg.x + 0.05), G.peg.y + 0.08, G.peg.z - 0.02).clone();
-      twoBoneIK(t.hipS[i], peg, LIMB.thigh, LIMB.shin, t.w.set(s * 0.25, 0.3, 1), t.kn[i]);
-      this.limb('thigh' + S, t.hipS[i], t.kn[i], LIMB.thigh);
-      this.limb('shin' + S, t.kn[i], peg, LIMB.shin);
-      this.foot('foot' + S, peg);
-    }
-    this.root.matrixAutoUpdate = false;
-    this.root.matrix.copy(chassisWorld);
-    this.root.matrixWorldNeedsUpdate = true;
-  }
-
-  /** Tucked tumble pose for crashes, placed at the ragdoll point. */
-  tumble(pos: Vector3, rot: Quaternion) {
-    const P = this.parts;
-    const t = this.tmp;
-    t.hip.set(0, -0.1, 0);
-    t.neck.set(0, 0.35, 0.1);
-    this.limb('torso', t.hip, t.neck, LIMB.torso);
-    P.pelvis.position.copy(t.hip);
-    this.helmet.position.set(0, 0.52, 0.16);
-    this.helmet.rotation.set(0.3, 0, 0);
-    for (let i = 0; i < 2; i++) {
-      const s = i === 0 ? 1 : -1;
-      const S = i === 0 ? 'L' : 'R';
-      const sh = new Vector3(s * 0.19, 0.3, 0.08), el = new Vector3(s * 0.3, 0.1, 0.25), hd = new Vector3(s * 0.2, 0.25, 0.4);
-      this.limb('uarm' + S, sh, el, LIMB.uarm);
-      this.limb('farm' + S, el, hd, LIMB.farm);
-      P['glove' + S].position.copy(hd);
-      const hp = new Vector3(s * 0.11, -0.1, 0), kn = new Vector3(s * 0.15, 0.15, 0.4), ft = new Vector3(s * 0.15, -0.25, 0.5);
-      this.limb('thigh' + S, hp, kn, LIMB.thigh);
-      this.limb('shin' + S, kn, ft, LIMB.shin);
-      this.foot('foot' + S, ft);
-    }
-    _q.copy(rot);
-    this.root.matrixAutoUpdate = false;
-    this.root.matrix.compose(pos, _q, new Vector3(1, 1, 1));
-    this.root.matrixWorldNeedsUpdate = true;
-  }
-}
-
 /** A flat shadow-catcher-free blob under the bike for low quality mode. */
 export function blobShadow(): Mesh {
   const m = new Mesh(new CircleGeometry(0.7, 20), new MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false }));
