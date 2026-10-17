@@ -3,6 +3,7 @@
  * the chain banks after a moment of calm riding and is lost on a crash.
  */
 import type { BikeDynamics } from '../physics/bike';
+import { TRICK_NAMES } from '../physics/bike';
 
 export interface ScoreEvent {
   type: 'trick' | 'bank' | 'bust';
@@ -122,10 +123,26 @@ export class Scorer {
       const rot = b.airRotLast;
       const flips = Math.floor((Math.abs(rot.x) + 0.6) / (Math.PI * 2));
       const spins = Math.floor((Math.abs(rot.y) + 0.5) / (Math.PI * 2));
-      let name = air > 1.2 ? 'Big Air' : 'Air';
-      let pts = air > 0.4 ? 80 * air * air + 60 * air : 0;
+      const L = b.airLast;
+      let name = air > 1.2 ? 'Big Air' : L.hop ? 'Bunny Hop' : 'Air';
+      let pts = air > 0.4 ? 80 * air * air + 60 * air : L.hop && air > 0.2 ? 60 + 120 * air : 0;
+      // Whip / flick: how far the bike was laid over in the air.
+      if (L.whip > 0.45) {
+        name = `${L.whip > 0.85 ? 'Big Whip' : 'Whip'} · ${name}`;
+        pts += 500 * L.whip;
+      }
+      // Rider poses: held time pays; still posing at touchdown is a bail (little credit).
+      if (L.pose !== 'none' && L.poseTime > 0.15) {
+        name = `${TRICK_NAMES[L.pose]} · ${name}`;
+        pts += 400 + 900 * Math.min(1.5, L.poseTime);
+        if (L.bailed) {
+          name += ' (bailed)';
+          pts *= 0.25;
+        }
+      }
       if (flips > 0) {
-        name = (rot.x > 0 ? 'Frontflip' : 'Backflip') + (flips > 1 ? ` x${flips}` : '');
+        const flip = (rot.x > 0 ? 'Frontflip' : 'Backflip') + (flips > 1 ? ` x${flips}` : '');
+        name = name === 'Air' || name === 'Big Air' ? flip : `${flip} · ${name}`;
         pts += 1500 * flips;
       }
       if (spins > 0) {

@@ -7,7 +7,7 @@ namespace StarkVarg
     {
         public BikeController bike;
         public BikeInput input;
-        GUIStyle big, small, btn;
+        GUIStyle big, small, btn, center, centerSmall;
         Texture2D white;
 
         void EnsureStyles()
@@ -21,6 +21,8 @@ namespace StarkVarg
             small.normal.textColor = new Color(1, 1, 1, 0.85f);
             btn = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(15 * u), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
             btn.normal.textColor = Color.white;
+            center = new GUIStyle(big) { fontSize = Mathf.RoundToInt(30 * u), alignment = TextAnchor.MiddleCenter };
+            centerSmall = new GUIStyle(small) { fontSize = Mathf.RoundToInt(16 * u), alignment = TextAnchor.MiddleCenter };
         }
 
         void Box(Rect r, Color c)
@@ -48,6 +50,15 @@ namespace StarkVarg
                 GUI.Label(new Rect(Screen.width / 2f - 120 * u, 14, 240 * u, 50 * u), $"Wheelie {bike.WheelieDistance:0} m", big);
             if (bike.BestWheelie > 0)
                 GUI.Label(new Rect(panel.x, panel.yMax + 4, 240 * u, 22 * u), $"Best wheelie {bike.BestWheelie:0} m", small);
+            // Landed trick: name and points for 2.5 s, plus the running score.
+            if (bike.LastTrickAge < 2.5f && bike.LastTrickPoints > 0)
+            {
+                var c = GUI.color;
+                GUI.color = new Color(0.78f, 0.96f, 0.2f, Mathf.Clamp01(2.5f - bike.LastTrickAge));
+                GUI.Label(new Rect(Screen.width / 2f - 300 * u, Screen.height * 0.2f, 600 * u, 50 * u), $"{bike.LastTrick}  +{bike.LastTrickPoints}", center);
+                GUI.color = c;
+            }
+            if (bike.Score > 0) GUI.Label(new Rect(Screen.width / 2f - 120 * u, Screen.height * 0.2f + 40 * u, 240 * u, 30 * u), $"Score {bike.Score}", centerSmall);
             if (bike.Crashed)
                 GUI.Label(new Rect(Screen.width / 2f - 160 * u, Screen.height * 0.35f, 320 * u, 60 * u), "Crashed! Resetting...", big);
 
@@ -62,6 +73,12 @@ namespace StarkVarg
                 GUI.Label(input.WheelieRect, "WHEELIE", btn);
                 Box(input.BoostRect, new Color(0.31f, 0.64f, 1f, input.Boost ? 0.6f : 0.3f));
                 GUI.Label(input.BoostRect, "BOOST", btn);
+                Box(input.JumpRect, new Color(1f, 0.69f, 0.13f, input.Jump ? 0.5f : 0.22f));
+                var jr = input.JumpRect;
+                Box(new Rect(jr.x, jr.yMax - jr.height * bike.JumpCharge, jr.width, jr.height * bike.JumpCharge), new Color(1f, 0.8f, 0.3f, 0.45f));
+                GUI.Label(input.JumpRect, "JUMP", btn);
+                Box(input.TrickRect, new Color(0.75f, 0.47f, 1f, input.Trick ? 0.55f : 0.25f));
+                GUI.Label(input.TrickRect, "TRICK", btn);
                 Box(input.ResetRect, new Color(1, 1, 1, 0.16f));
                 GUI.Label(input.ResetRect, "RESET", btn);
                 if (input.StickHeld)
@@ -73,7 +90,7 @@ namespace StarkVarg
             }
             else
             {
-                GUI.Label(new Rect(14, Screen.height - 30 * u, Screen.width, 26 * u), "W/S throttle/brake · A/D steer · Shift wheelie (Q/E height) · F boost · R reset", small);
+                GUI.Label(new Rect(14, Screen.height - 30 * u, Screen.width, 26 * u), "W/S throttle/brake · A/D steer (in the air: whip) · Shift wheelie (Q/E height) · J hop (hold to charge) · T air trick · Q/E flips · F boost · R reset", small);
             }
         }
     }

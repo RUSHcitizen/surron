@@ -128,6 +128,10 @@ namespace StarkVarg
         }
 
         // --- Placeholder rider in MX gear (white jersey, black pants, white boots/helmet) ---
+        // Limb pivots (shoulders and hips) and each limb's rest direction, for the trick poses.
+        readonly Transform[] arm = new Transform[2], leg = new Transform[2];
+        readonly Vector3[] armRest = new Vector3[2], legRest = new Vector3[2];
+
         void BuildPlaceholderRider()
         {
             riderRoot = new GameObject("Rider").transform;
@@ -143,23 +147,38 @@ namespace StarkVarg
             Shapes.Prim(PrimitiveType.Sphere, riderRoot, head, new Vector3(0.28f, 0.29f, 0.32f), helmet);
             Shapes.Prim(PrimitiveType.Cube, riderRoot, head + new Vector3(0, 0.0f, 0.15f), new Vector3(0.2f, 0.07f, 0.05f), visor);
             Shapes.Prim(PrimitiveType.Cube, riderRoot, head + new Vector3(0, 0.1f, 0.2f), new Vector3(0.22f, 0.02f, 0.14f), helmet, false, Quaternion.Euler(-15f, 0, 0));
-            foreach (float s in new[] { 1f, -1f })
+            for (int i = 0; i < 2; i++)
             {
+                float s = i == 0 ? 1f : -1f; // +1 = the rider's right (+X)
                 Vector3 sh = neck + new Vector3(s * 0.2f, -0.06f, 0), el = new Vector3(s * 0.34f, 1.25f, 0.32f), wr = new Vector3(s * 0.38f, 1.17f, 0.58f);
-                Shapes.Between(PrimitiveType.Capsule, riderRoot, sh, el, 0.055f, jersey);
-                Shapes.Between(PrimitiveType.Capsule, riderRoot, el, wr, 0.048f, jersey);
-                Shapes.Prim(PrimitiveType.Sphere, riderRoot, wr, Vector3.one * 0.1f, glove);
+                arm[i] = Pivot("Arm" + i, sh);
+                armRest[i] = (wr - sh).normalized;
+                Shapes.Between(PrimitiveType.Capsule, arm[i], Vector3.zero, el - sh, 0.055f, jersey);
+                Shapes.Between(PrimitiveType.Capsule, arm[i], el - sh, wr - sh, 0.048f, jersey);
+                Shapes.Prim(PrimitiveType.Sphere, arm[i], wr - sh, Vector3.one * 0.1f, glove);
                 Vector3 hs = hip + new Vector3(s * 0.11f, 0, 0), kn = new Vector3(s * 0.2f, 0.92f, 0.32f), an = new Vector3(s * 0.2f, 0.45f, 0.06f);
-                Shapes.Between(PrimitiveType.Capsule, riderRoot, hs, kn, 0.085f, pants);
-                Shapes.Between(PrimitiveType.Capsule, riderRoot, kn, an, 0.07f, boot);
-                Shapes.Prim(PrimitiveType.Cube, riderRoot, an + new Vector3(0, -0.04f, 0.07f), new Vector3(0.1f, 0.07f, 0.26f), boot);
+                leg[i] = Pivot("Leg" + i, hs);
+                legRest[i] = (an - hs).normalized;
+                Shapes.Between(PrimitiveType.Capsule, leg[i], Vector3.zero, kn - hs, 0.085f, pants);
+                Shapes.Between(PrimitiveType.Capsule, leg[i], kn - hs, an - hs, 0.07f, boot);
+                Shapes.Prim(PrimitiveType.Cube, leg[i], an - hs + new Vector3(0, -0.04f, 0.07f), new Vector3(0.1f, 0.07f, 0.26f), boot);
             }
+        }
+
+        Transform Pivot(string name, Vector3 at)
+        {
+            var t = new GameObject(name).transform;
+            t.SetParent(riderRoot, false);
+            t.localPosition = at;
+            return t;
         }
 
         void LateUpdate()
         {
             if (bike == null || lean == null) return;
-            lean.localRotation = Quaternion.Euler(0, 0, -bike.LeanDeg);
+            // Whip: the bike is thrown sideways in the air (laid over and turned across the path).
+            float whip = bike.Whip;
+            lean.localRotation = Quaternion.Euler(0, whip * 32f, -(bike.LeanDeg + whip * 58f));
             pitch.localRotation = Quaternion.Euler(-bike.PitchDeg, 0, 0);
             if (steering != null) steering.localRotation = Quaternion.Euler(-26f, 0, 0) * Quaternion.Euler(0, bike.SteerAngle, 0);
             float dt = Time.deltaTime;
@@ -167,11 +186,26 @@ namespace StarkVarg
             frontSpin += bike.Speed / FrontR * Mathf.Rad2Deg * dt;
             if (rearWheel != null) rearWheel.localRotation = Quaternion.Euler(rearSpin, 0, 0);
             if (frontWheel != null) frontWheel.localRotation = Quaternion.Euler(26f, 0, 0) * Quaternion.Euler(frontSpin, 0, 0);
-            // Rider hangs off a little into the lean and tucks in a wheelie.
-            if (riderRoot != null)
+            if (riderRoot == null) return;
+            // Rider hangs off into the lean, tucks in a wheelie, crouches to pre-load a bunny hop.
+            float amt = bike.TrickAmt;
+            var pose = bike.TrickPose;
+            float sup = pose == BikeController.Pose.Superman ? amt : 0f;
+            riderRoot.localPosition = new Vector3(Mathf.Clamp(bike.LeanDeg / 50f, -1, 1) * 0.06f, -0.12f * bike.JumpCharge + 0.14f * sup, (bike.PitchDeg > 5f ? -0.08f : 0f) - 0.1f * sup);
+            riderRoot.localRotation = Quaternion.Euler((bike.PitchDeg > 5f ? -bike.PitchDeg * 0.35f : 0f) + 28f * sup, 0, -bike.LeanDeg * 0.15f);
+            if (arm[0] == null) return;
+            for (int i = 0; i < 2; i++)
             {
-                riderRoot.localPosition = new Vector3(Mathf.Clamp(bike.LeanDeg / 50f, -1, 1) * 0.06f, 0, bike.PitchDeg > 5f ? -0.08f : 0f);
-                riderRoot.localRotation = Quaternion.Euler(bike.PitchDeg > 5f ? -bike.PitchDeg * 0.35f : 0f, 0, -bike.LeanDeg * 0.15f);
+                float s = i == 0 ? 1f : -1f;
+                // No-hander: arms flung out wide and up.
+                Vector3 armT = pose == BikeController.Pose.NoHander ? new Vector3(s * 0.8f, 0.6f, 0.1f).normalized : armRest[i];
+                arm[i].localRotation = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(armRest[i], armT), pose == BikeController.Pose.NoHander ? amt : 0f);
+                // Superman: both legs stretched out behind. Can-can: one leg swung over the seat.
+                Vector3 legT = legRest[i];
+                float w = 0f;
+                if (pose == BikeController.Pose.Superman) { legT = new Vector3(s * 0.12f, 0.2f, -1f).normalized; w = amt; }
+                else if (pose == BikeController.Pose.CanCan && s == bike.TrickSide) { legT = new Vector3(-s * 0.9f, 0.35f, 0.3f).normalized; w = amt; }
+                leg[i].localRotation = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(legRest[i], legT), w);
             }
         }
     }

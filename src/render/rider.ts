@@ -501,6 +501,8 @@ export interface RiderBody {
   look: number;
   /** Road height in the chassis frame, for the planted foot. */
   groundY: number;
+  /** Air trick pose and how far into it (0..1); side picks the can-can leg (+1 = right leg). */
+  trick?: { pose: 'none' | 'superman' | 'cancan' | 'nohander'; amt: number; side: number };
 }
 const NO_BODY: RiderBody = { stand: 0, accel: 0, foot: 0, look: 0, groundY: -0.5 };
 
@@ -622,6 +624,8 @@ export class RiderModel {
     const j = this.j;
     const crouch = Math.min(1, Math.abs(speed) / 18);
     const stand = body.stand, accel = body.accel, foot = body.foot;
+    const tp = body.trick?.pose ?? 'none', ta = body.trick?.amt ?? 0;
+    const sup = tp === 'superman' ? ta : 0;
     // Hanging off: in a lean the rider slides the hips and drops the shoulders to the inside
     // (bike +x is its left, and a positive lean is to the right).
     const hang = Math.max(-1, Math.min(1, lean / 0.8)) * Math.min(1, Math.abs(speed) / 6);
@@ -629,12 +633,12 @@ export class RiderModel {
     // at a stop slides the hips a little toward it.
     j.hip.set(
       G.riderHip.x + lat * 0.07 - hang * 0.075 * (1 - stand) + foot * 0.035,
-      G.riderHip.y + 0.03 + shift * -0.03 - Math.abs(hang) * 0.02 + stand * 0.27,
-      G.riderHip.z - 0.06 + shift * 0.12 + stand * 0.1 - accel * 0.035,
+      G.riderHip.y + 0.03 + shift * -0.03 - Math.abs(hang) * 0.02 + stand * 0.27 + sup * 0.2,
+      G.riderHip.z - 0.06 + shift * 0.12 + stand * 0.1 - accel * 0.035 - sup * 0.12,
     );
     // Torso leans toward the bars, more when crouched/shifted forward; sits up in a wheelie.
     // Acceleration rocks it back, braking pitches it forward; standing bends at the hips.
-    const pitch = 0.62 + crouch * 0.18 + shift * 0.4 - accel * 0.13 + stand * 0.12;
+    const pitch = 0.62 + crouch * 0.18 + shift * 0.4 - accel * 0.13 + stand * 0.12 + sup * 0.55;
     const roll = lat * 0.25 - hang * 0.32;
     j.neck.set(Math.sin(roll) * LIMB.torso + j.hip.x, j.hip.y + Math.cos(pitch) * LIMB.torso, j.hip.z + Math.sin(pitch) * LIMB.torso);
     spineMid(j);
@@ -649,6 +653,8 @@ export class RiderModel {
       const s = i === 0 ? 1 : -1;
       j.sh[i].copy(j.neck).add(this.v.set(s * 0.19, -0.07, -0.02 + s * twist * 0.7));
       j.wr[i].copy(grips[i]);
+      // No-hander: both hands off the bars, arms flung out wide and up.
+      if (tp === 'nohander') j.wr[i].lerp(this.v.set(s * 0.62, j.sh[i].y + 0.18, j.sh[i].z + 0.12), ta);
       twoBoneIK(j.sh[i], j.wr[i], LIMB.uarm, LIMB.farm, armHint(s, _h), j.el[i]);
       j.hipS[i].copy(j.hip).add(this.v.set(s * 0.105, 0, 0));
       j.an[i].set(s * (G.peg.x + 0.05), G.peg.y + 0.08, G.peg.z - 0.02);
@@ -657,6 +663,10 @@ export class RiderModel {
         this.v.set(s * (G.peg.x + 0.27), body.groundY + 0.09, G.peg.z + 0.18);
         j.an[i].lerp(this.v, foot);
       }
+      // Superman: both legs kicked off the pegs and stretched out behind, over the tail.
+      if (tp === 'superman') j.an[i].lerp(this.v.set(s * 0.14, G.seat.y + 0.32, G.seat.z - 0.78), ta);
+      // Can-can: one leg swung over the seat to the other side (side +1 = the right leg).
+      if (tp === 'cancan' && s === -body.trick!.side) j.an[i].lerp(this.v.set(-s * 0.42, G.seat.y + 0.12, G.peg.z + 0.32), ta);
       twoBoneIK(j.hipS[i], j.an[i], LIMB.thigh, LIMB.shin, legHint(s, _h), j.kn[i]);
       j.toe[i].copy(j.an[i]).add(this.v.set(0, -0.03, 0.16));
     }

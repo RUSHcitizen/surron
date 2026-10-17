@@ -526,7 +526,7 @@ export class Game {
   }
 
   /** Rider body language (smoothed): stand, foot down, head turn, accel/brake sway. */
-  private riderBody: RiderBody = { stand: 0, accel: 0, foot: 0, look: 0, groundY: -0.5 };
+  private riderBody: RiderBody = { stand: 0, accel: 0, foot: 0, look: 0, groundY: -0.5, trick: { pose: 'none', amt: 0, side: 1 } };
   private lastSpeed = 0;
   private accelS = 0;
   private updateRiderBody(dt: number, chassis: Matrix4) {
@@ -538,8 +538,10 @@ export class Game {
     const rough = b.rear.surface !== 'asphalt' && b.rear.surface !== 'concrete';
     const wheelie = b.pitch > 0.18 && b.rear.grounded && !b.front.grounded;
     // Stand up for jumps and rough ground at pace; sit for wheelies, slow riding and corners.
-    const standT = wheelie ? 0 : air ? 1 : rough && v > 7 && Math.abs(b.lean) < 0.35 ? 0.7 : 0;
-    r.stand = ease(r.stand, standT, standT > r.stand ? 5 : 3);
+    // Pre-loading a bunny hop sinks the rider into the bike (negative stand = crouch).
+    const standT = b.jumpCharge > 0.02 ? -0.55 * b.jumpCharge : wheelie || b.trickAmt > 0 ? 0 : air ? 1 : rough && v > 7 && Math.abs(b.lean) < 0.35 ? 0.7 : 0;
+    r.stand = ease(r.stand, standT, b.jumpCharge > 0.02 ? 10 : standT > r.stand ? 5 : 3);
+    r.trick = { pose: b.trickPose, amt: b.trickAmt, side: b.trickSide };
     // Foot down when (nearly) stopped and not driving off.
     const footT = v < 1.0 && (b.front.grounded || b.rear.grounded) && b.input.throttle < 0.15 && !wheelie ? 1 : 0;
     r.foot = ease(r.foot, footT, footT > r.foot ? 3.5 : 7);
@@ -656,6 +658,12 @@ export class Game {
         for (let i = 0; i < 14 * c.dust; i++) {
           this.particles.emit(p, _v.set((Math.random() - 0.5) * 3, Math.random() * 1.2, (Math.random() - 0.5) * 3), c.color, 0.5, 1.2, { grow: 1.4, drag: 2 });
         }
+      } else if (e.type === 'hop') {
+        this.audio.impact(0.25 + e.strength * 0.25, 'bump', this.bike.rear.surface);
+        this.cam.bump(0.12 + e.strength * 0.1);
+        const p = this.bike.rear.contact;
+        const c = SURFACE_PROPS[this.bike.rear.surface];
+        for (let i = 0; i < 8 * c.dust; i++) this.particles.emit(p, _v.set((Math.random() - 0.5) * 2, Math.random() * 0.8, (Math.random() - 0.5) * 2), c.color, 0.4, 0.9, { grow: 1.3, drag: 2.5 });
       } else if (e.type === 'bump') this.audio.impact(e.strength * 0.5, 'bump', this.bike.front.surface);
       else if (e.type === 'scrape') this.audio.impact(e.strength * 0.3, 'scrape');
       else if (e.type === 'crash') {
@@ -714,6 +722,7 @@ export class Game {
       // Wheelie meter: how high the front is (full = near the loop-out angle).
       this.touch.setWheelieHold(b.wheelieHold > 0 ? Math.max(0, b.pitch) / 1.1 : 0);
       this.touch.setBoost(this.boostMeter);
+      this.touch.setJumpCharge(b.jumpCharge);
     }
     this.ui.hud.update(dt);
   }

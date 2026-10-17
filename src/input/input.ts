@@ -4,11 +4,11 @@
  */
 export type Action =
   | 'throttle' | 'frontBrake' | 'rearBrake' | 'steerLeft' | 'steerRight' | 'leanForward' | 'leanBack'
-  | 'wheelie' | 'stoppie' | 'boost' | 'reset' | 'camera' | 'pause' | 'garage' | 'mode' | 'hud' | 'lights';
+  | 'wheelie' | 'stoppie' | 'boost' | 'jump' | 'trick' | 'reset' | 'camera' | 'pause' | 'garage' | 'mode' | 'hud' | 'lights';
 
 export const ACTION_LABELS: Record<Action, string> = {
   throttle: 'Throttle', frontBrake: 'Front brake', rearBrake: 'Rear brake', steerLeft: 'Steer left', steerRight: 'Steer right',
-  leanForward: 'Lean forward', leanBack: 'Lean back / wheelie', wheelie: 'Wheelie (hold to ride it; lean sets the height)', stoppie: 'Stoppie (hold)', boost: 'Boost (hold)', reset: 'Reset bike', camera: 'Change camera', pause: 'Pause',
+  leanForward: 'Lean forward', leanBack: 'Lean back / wheelie', wheelie: 'Wheelie (hold to ride it; lean sets the height)', stoppie: 'Stoppie (hold)', boost: 'Boost (hold)', jump: 'Bunny hop (hold to charge, release to jump)', trick: 'Air trick (in the air; stick picks it)', reset: 'Reset bike', camera: 'Change camera', pause: 'Pause',
   garage: 'Garage', mode: 'Ride mode', hud: 'Toggle HUD', lights: 'Headlight',
 };
 
@@ -25,6 +25,8 @@ export const DEFAULT_BINDINGS: Bindings = {
   wheelie: ['KeyZ'],
   stoppie: ['KeyX'],
   boost: ['KeyF'],
+  jump: ['KeyJ'],
+  trick: ['KeyT'],
   reset: ['KeyR'],
   camera: ['KeyC'],
   pause: ['Escape', 'KeyP'],
@@ -44,6 +46,8 @@ export interface ControlState {
   wheelie: number;
   stoppie: number;
   boost: number;
+  jump: number;
+  trick: number;
 }
 
 /** Analog values written by the touch overlay (null when not touching). */
@@ -56,6 +60,8 @@ export interface TouchAxes {
   wheelie: number;
   stoppie: number;
   boost: number;
+  jump: number;
+  trick: number;
 }
 
 const EDGE: Action[] = ['reset', 'camera', 'pause', 'garage', 'mode', 'hud', 'lights'];
@@ -64,8 +70,8 @@ export class Input {
   bindings: Bindings = structuredClone(DEFAULT_BINDINGS);
   private down = new Set<string>();
   private pressed = new Set<Action>();
-  state: ControlState = { throttle: 0, frontBrake: 0, rearBrake: 0, steer: 0, lean: 0, wheelie: 0, stoppie: 0, boost: 0 };
-  touch: TouchAxes = { throttle: 0, frontBrake: 0, rearBrake: 0, steer: null, lean: null, wheelie: 0, stoppie: 0, boost: 0 };
+  state: ControlState = { throttle: 0, frontBrake: 0, rearBrake: 0, steer: 0, lean: 0, wheelie: 0, stoppie: 0, boost: 0, jump: 0, trick: 0 };
+  touch: TouchAxes = { throttle: 0, frontBrake: 0, rearBrake: 0, steer: null, lean: null, wheelie: 0, stoppie: 0, boost: 0, jump: 0, trick: 0 };
   steerSensitivity = 1;
   enabled = true;
   /** Mouse drag orbit for the camera (pixels since last read). */
@@ -160,16 +166,16 @@ export class Input {
     let gp: Gamepad | null = null;
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     for (const p of pads) if (p && p.connected) { gp = p; break; }
-    let gThrottle = 0, gFront = 0, gRear = 0, gSteer = 0, gLean = 0, gWheelie = 0, gStoppie = 0, gBoost = 0;
+    let gThrottle = 0, gFront = 0, gRear = 0, gSteer = 0, gLean = 0, gWheelie = 0, gStoppie = 0, gBoost = 0, gJump = 0, gTrick = 0;
     if (gp) {
       const ax = (i: number) => (Math.abs(gp!.axes[i] ?? 0) > 0.12 ? gp!.axes[i] : 0);
       const btn = (i: number) => gp!.buttons[i]?.value ?? 0;
       gThrottle = btn(7);
       gFront = btn(6);
-      gRear = Math.max(btn(5), btn(1));
+      gRear = btn(5);
       gSteer = ax(0);
       gLean = -ax(3) || -ax(1) * 0.0;
-      const map: [number, Action][] = [[3, 'reset'], [9, 'pause'], [8, 'camera'], [2, 'mode'], [4, 'leanBack']];
+      const map: [number, Action][] = [[3, 'reset'], [9, 'pause'], [8, 'camera'], [12, 'mode'], [4, 'leanBack']];
       for (const [i, a] of map) {
         const now = (gp.buttons[i]?.value ?? 0) > 0.5;
         if (now && !this.gpPrev[i] && a !== 'leanBack') this.pressed.add(a);
@@ -180,6 +186,8 @@ export class Input {
       gWheelie = (gp.buttons[0]?.value ?? 0) > 0.5 ? 1 : 0; // A
       gStoppie = (gp.buttons[10]?.value ?? 0) > 0.5 ? 1 : 0; // left stick click
       gBoost = (gp.buttons[11]?.value ?? 0) > 0.5 ? 1 : 0; // right stick click
+      gJump = btn(1) > 0.5 ? 1 : 0; // B
+      gTrick = btn(2) > 0.5 ? 1 : 0; // X
     }
     const approach = (cur: number, target: number, up: number, down: number) => {
       const r = target > cur ? up : down;
@@ -222,6 +230,8 @@ export class Input {
     s.wheelie = Math.max(kb && this.isDown('wheelie') ? 1 : 0, gWheelie, t.wheelie);
     s.stoppie = Math.max(kb && this.isDown('stoppie') ? 1 : 0, gStoppie, t.stoppie);
     s.boost = Math.max(kb && this.isDown('boost') ? 1 : 0, gBoost, t.boost);
+    s.jump = Math.max(kb && this.isDown('jump') ? 1 : 0, gJump, t.jump);
+    s.trick = Math.max(kb && this.isDown('trick') ? 1 : 0, gTrick, t.trick);
   }
 
   readOrbit() {

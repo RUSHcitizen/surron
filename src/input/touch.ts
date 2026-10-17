@@ -15,7 +15,7 @@ import type { Action, Input } from './input';
 import { localRect, toLocal } from '../ui/orient';
 
 type Zone = 'stick' | 'cluster' | 'orbit';
-type Sub = 'throttle' | 'front' | 'rear' | 'wheelie' | 'stoppie' | 'boost' | null;
+type Sub = 'throttle' | 'front' | 'rear' | 'wheelie' | 'stoppie' | 'boost' | 'jump' | 'trick' | null;
 type Btn = Exclude<Sub, null>;
 
 interface Ptr {
@@ -52,6 +52,8 @@ export class TouchControls {
         <div class="t-stick"><div class="t-stick-base"></div><div class="t-knob"></div><span class="t-hint">STEER · LEAN</span></div>
       </div>
       <div class="t-right" data-zone="cluster">
+        <div class="t-btn t-trick t-jump" data-sub="jump">JUMP<small>hold · release</small></div>
+        <div class="t-btn t-trick t-air" data-sub="trick">TRICK<small>in the air</small></div>
         <div class="t-btn t-boost" data-sub="boost">BOOST</div>
         <div class="t-btn t-trick t-wheelie" data-sub="wheelie">WHEELIE<small>hold · stick sets height</small></div>
         <div class="t-btn t-trick t-stoppie" data-sub="stoppie">STOPPIE<small>hold</small></div>
@@ -77,6 +79,8 @@ export class TouchControls {
       wheelie: this.el.querySelector('.t-wheelie')!,
       stoppie: this.el.querySelector('.t-stoppie')!,
       boost: this.el.querySelector('.t-boost')!,
+      jump: this.el.querySelector('.t-jump')!,
+      trick: this.el.querySelector('.t-air')!,
     };
     for (const z of this.el.querySelectorAll<HTMLElement>('[data-zone]')) {
       z.addEventListener('pointerdown', (e) => this.onDown(e, z.dataset.zone as Zone));
@@ -126,7 +130,7 @@ export class TouchControls {
     this.ptrs.clear();
     this.stickPtr = -1;
     const t = this.input.touch;
-    t.throttle = t.frontBrake = t.rearBrake = t.wheelie = t.stoppie = t.boost = 0;
+    t.throttle = t.frontBrake = t.rearBrake = t.wheelie = t.stoppie = t.boost = t.jump = t.trick = 0;
     t.steer = t.lean = null;
     this.resetStickVisual();
     this.refreshCluster();
@@ -162,7 +166,7 @@ export class TouchControls {
       this.stickBase.classList.add('pressed');
     } else if (zone === 'cluster') {
       const rr = (k: Btn) => localRect(this.btn[k]);
-      this.rects = { throttle: rr('throttle'), front: rr('front'), rear: rr('rear'), wheelie: rr('wheelie'), stoppie: rr('stoppie'), boost: rr('boost') };
+      this.rects = { throttle: rr('throttle'), front: rr('front'), rear: rr('rear'), wheelie: rr('wheelie'), stoppie: rr('stoppie'), boost: rr('boost'), jump: rr('jump'), trick: rr('trick') };
     }
     this.ptrs.set(e.pointerId, p);
     this.apply(e.pointerId, p, ex, ey);
@@ -234,6 +238,8 @@ export class TouchControls {
     if (exact(r.wheelie)) return 'wheelie';
     if (exact(r.stoppie)) return 'stoppie';
     if (exact(r.boost)) return 'boost';
+    if (exact(r.jump)) return 'jump';
+    if (exact(r.trick)) return 'trick';
     return null;
   }
 
@@ -246,6 +252,16 @@ export class TouchControls {
     }
   }
   private lastBoost = '';
+
+  /** 0..1 bunny-hop pre-load shown as a fill on the JUMP button. */
+  setJumpCharge(f: number) {
+    const v = Math.max(0, Math.min(1, f)).toFixed(2);
+    if (v !== this.lastJump) {
+      this.lastJump = v;
+      this.btn.jump.style.setProperty('--hold', v);
+    }
+  }
+  private lastJump = '';
 
   /** 0..1 wheelie-height meter on the wheelie button (1 = near the loop-out angle). */
   setWheelieHold(f: number) {
@@ -260,13 +276,15 @@ export class TouchControls {
   /** Aggregate all cluster pointers into throttle/brake values and button highlights. */
   private refreshCluster() {
     const t = this.input.touch;
-    let thr = 0, front = 0, rear = 0, wheelie = 0, stoppie = 0, boost = 0;
+    let thr = 0, front = 0, rear = 0, wheelie = 0, stoppie = 0, boost = 0, jump = 0, trick = 0;
     for (const p of this.ptrs.values()) {
       if (p.zone !== 'cluster' || !p.sub) continue;
       if (p.sub === 'front') front = 1;
       else if (p.sub === 'rear') rear = 1;
       else if (p.sub === 'wheelie') wheelie = 1;
       else if (p.sub === 'stoppie') stoppie = 1;
+      else if (p.sub === 'jump') jump = 1;
+      else if (p.sub === 'trick') trick = 1;
       else if (p.sub === 'boost') {
         // Boost keeps full throttle on: a thumb on BOOST rides flat out.
         boost = 1;
@@ -285,6 +303,10 @@ export class TouchControls {
     t.wheelie = wheelie;
     t.stoppie = stoppie;
     t.boost = boost;
+    t.jump = jump;
+    t.trick = trick;
+    this.btn.jump.classList.toggle('pressed', jump > 0);
+    this.btn.trick.classList.toggle('pressed', trick > 0);
     this.btn.boost.classList.toggle('pressed', boost > 0);
     this.btn.wheelie.classList.toggle('pressed', wheelie > 0);
     this.btn.stoppie.classList.toggle('pressed', stoppie > 0);

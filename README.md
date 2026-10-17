@@ -44,6 +44,9 @@ The service worker is only registered in production builds (`npm run build && np
 | **E** | Lean forward: keep the front down, stoppie, push down in the air |
 | **Z** | **Wheelie button** (hold). Pops a wheelie and rides it at the balance point for as long as you hold it. Steer to turn on the back wheel, lean back / forward to raise or lower the front, add throttle to pull harder (Realistic crash rule: pull it past the balance point and you loop out) |
 | **X** | **Stoppie button** (hold). Weight forward plus front brake; too long at speed sends you over the bars |
+| **J** | **Bunny hop** (JUMP). Tap for a ~0.6 m hop, hold up to 0.6 s to pre-load and release for ~1.6 m (clears a car bonnet) |
+| **A / D in the air** | **Whip / flick**: throws the bike sideways (~50°) and straightens it before touchdown |
+| **T** | **Air trick** (TRICK, in the air): Superman; with steer = Can-Can; with lean forward = No-Hander. Still posing at touchdown = bail |
 | **F** | **Boost** (hold): a few seconds of electric overboost. Refills slowly, and faster from tricks and near misses |
 | **R** | Reset to the last safe spot |
 | **C** | Camera: chase / far / helmet |

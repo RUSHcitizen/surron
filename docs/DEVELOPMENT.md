@@ -79,6 +79,13 @@ instead of exploding it.
 - [x] PWA: manifest, icons, generated precaching service worker, offline fallback, cache versioning.
 - [x] Cloudflare Pages config (`_headers`, `wrangler.toml`, docs).
 - [x] 59 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] Round 10: tricks. JUMP = bunny hop (hold to pre-load up to 0.6 s; ~0.6 m tap, ~1.6 m full; front first).
+      Steer in the air = whip / flick (`airTricks`: yaw/pitch/roll rates split like `wheelieControl`; nose held on the
+      trajectory; straightens for the last 0.45 s before the predicted touchdown). TRICK in the air = Superman /
+      Can-Can (steer) / No-Hander (lean forward) rider poses (`RiderBody.trick`); still posing at touchdown = bail.
+      Scoring combines names (e.g. "Superman · Whip · Bunny Hop"). New touch buttons JUMP / TRICK, keys J / T,
+      gamepad B / X (rear brake moved to RB only, ride mode to d-pad up). Tests: hop heights, whip lands straight on
+      every preset at 72 km/h, pose / bail, trick names. Unity port has the same tricks. Shots: `shot-tricks.mjs`.
 - [x] Round 9: moulded bodywork (`render/bodyShell.ts`): shrouds, tank cover, saddle running onto the tank, side panels
       and tail as one SDF surface with per-vertex colours (race kit keeps the old panels); upper frame rails tucked under
       it. Rider: slimmer arms, bigger fists, tapered waist, thigh and boots, elbows lower (`armHint`), crisper gear

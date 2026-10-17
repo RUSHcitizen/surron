@@ -46,6 +46,24 @@ namespace StarkVarg
         public float BoostMeter { get; private set; } = 1f;
         public float AirTime { get; private set; }
 
+        // --- Tricks ---
+        public enum Pose { None, Superman, CanCan, NoHander }
+        /// <summary>Bunny-hop pre-load 0..1 (JUMP held).</summary>
+        public float JumpCharge { get; private set; }
+        /// <summary>Whip / flick in the air: -1..1 (visual roll and yaw across the flight path).</summary>
+        public float Whip { get; private set; }
+        public Pose TrickPose { get; private set; }
+        public float TrickAmt { get; private set; }
+        public int TrickSide { get; private set; } = 1;
+        /// <summary>Running score and the last landed trick (name, points), for the HUD.</summary>
+        public int Score { get; private set; }
+        public string LastTrick { get; private set; } = "";
+        public int LastTrickPoints { get; private set; }
+        public float LastTrickAge { get; private set; } = 99f;
+        bool jumpHeld, hopFlag;
+        float hopCooldown, airWhipMax, poseTime, airPitchAccum;
+        Pose posePeak;
+
         Rigidbody rb;
         // Unity 6 renamed Rigidbody.velocity to linearVelocity.
         Vector3 Vel
@@ -96,7 +114,8 @@ namespace StarkVarg
             if (input.ResetPressed) Respawn(rb.position + Vector3.up * 0.5f, yaw);
 
             // --- Ground probe (from the bike's middle) ---
-            Grounded = Physics.Raycast(rb.position + Vector3.up * 0.6f, Vector3.down, out var hit, 1.0f, ~0, QueryTriggerInteraction.Ignore);
+            Grounded = Physics.Raycast(rb.position + Vector3.up * 0.6f, Vector3.down, out var hit, 0.78f, ~0, QueryTriggerInteraction.Ignore);
+            LastTrickAge += dt;
             groundNormal = Grounded ? hit.normal : Vector3.up;
 
             if (Crashed)
@@ -110,6 +129,23 @@ namespace StarkVarg
 
             float v = Speed;
             float av = Mathf.Abs(v);
+
+            // --- Bunny hop: hold JUMP to pre-load, release to pop (tap ≈ 0.6 m, full ≈ 1.6 m) ---
+            hopCooldown = Mathf.Max(0, hopCooldown - dt);
+            if (input.Jump) JumpCharge = Mathf.Min(1f, JumpCharge + dt / 0.6f);
+            if (!input.Jump && jumpHeld && Grounded && hopCooldown <= 0)
+            {
+                float up = 3.3f + 2.3f * JumpCharge;
+                var vel0 = Vel;
+                vel0.y = Mathf.Max(vel0.y, 0f) + up;
+                Vel = vel0;
+                PitchDeg = Mathf.Max(PitchDeg, 6f + 8f * JumpCharge); // front comes up first
+                hopCooldown = 0.35f;
+                hopFlag = true;
+                Grounded = false;
+            }
+            if (!input.Jump) JumpCharge = Mathf.Max(0, JumpCharge - dt * 4f);
+            jumpHeld = input.Jump;
 
             // --- Drive ---
             bool boosting = input.Boost && BoostMeter > 0.02f;
@@ -175,13 +211,83 @@ namespace StarkVarg
             else
             {
                 // In the air the stick pitches the bike (nose up / down).
-                airPitch = Mathf.Lerp(airPitch, -input.Lean * 90f, 1f - Mathf.Exp(-3f * dt));
+                // (Ignored while posing or whipping: the rider is busy.)
+                float pitchIn = input.Trick || Mathf.Abs(Whip) > 0.1f ? 0f : -input.Lean;
+                airPitch = Mathf.Lerp(airPitch, pitchIn * 360f, 1f - Mathf.Exp(-3f * dt));
                 PitchDeg += airPitch * dt;
+                airPitchAccum += airPitch * dt;
                 AirTime += dt;
+                AirTricks(dt);
             }
-            if (Grounded && AirTime > 0) { AirTime = 0; PitchDeg = Mathf.Clamp(PitchDeg, -10f, 40f); }
+            if (Grounded && AirTime > 0) Land();
+            if (Grounded)
+            {
+                Whip = Mathf.MoveTowards(Whip, 0, 8f * dt);
+                TrickAmt = Mathf.MoveTowards(TrickAmt, 0, 8f * dt);
+                if (TrickAmt == 0) TrickPose = Pose.None;
+            }
 
             ApplyVelocity(dt);
+        }
+
+        /// <summary>
+        /// Air tricks: steer = whip (the bike is thrown sideways and straightens itself for the
+        /// last 0.45 s before touchdown); TRICK held = a pose picked by the stick.
+        /// </summary>
+        void AirTricks(float dt)
+        {
+            if (input.Trick && TrickPose == Pose.None && AirTime > 0.12f)
+            {
+                if (input.Lean > 0.4f) TrickPose = Pose.NoHander;
+                else if (Mathf.Abs(input.Steer) > 0.4f) { TrickPose = Pose.CanCan; TrickSide = input.Steer > 0 ? 1 : -1; }
+                else TrickPose = Pose.Superman;
+            }
+            TrickAmt = Mathf.MoveTowards(TrickAmt, input.Trick && TrickPose != Pose.None ? 1f : 0f, (input.Trick ? 5f : 6f) * dt);
+            if (TrickAmt == 0) TrickPose = Pose.None;
+            if (TrickAmt > 0.7f) { poseTime += dt; posePeak = TrickPose; }
+
+            // Time to touchdown (ballistic, ground below): straighten up for the last 0.45 s.
+            float g = -Physics.gravity.y;
+            float h = Physics.Raycast(rb.position + Vector3.up * 0.2f, Vector3.down, out var gh, 50f, ~0, QueryTriggerInteraction.Ignore) ? gh.distance - 0.2f : 0f;
+            float vy = Vel.y;
+            float tLand = (vy + Mathf.Sqrt(vy * vy + 2f * g * Mathf.Max(0, h))) / g;
+            bool landing = tLand < 0.45f;
+            float target = input.Trick || landing || Mathf.Abs(input.Steer) < 0.25f ? 0f : input.Steer;
+            Whip = Mathf.MoveTowards(Whip, target, (target != 0 ? 4.5f : landing ? 11f : 6f) * dt);
+            airWhipMax = Mathf.Max(airWhipMax, Mathf.Abs(Whip));
+        }
+
+        /// <summary>Touchdown: name and score the jump, forgive the landing angle (arcade).</summary>
+        void Land()
+        {
+            float air = AirTime;
+            AirTime = 0;
+            bool bailed = TrickAmt > 0.45f;
+            var parts = new System.Collections.Generic.List<string>();
+            float pts = air > 0.4f ? 80f * air * air + 60f * air : (hopFlag && air > 0.2f ? 60f + 120f * air : 0f);
+            int flips = Mathf.FloorToInt((Mathf.Abs(airPitchAccum) + 40f) / 360f);
+            if (flips > 0) { parts.Add((airPitchAccum > 0 ? "Backflip" : "Frontflip") + (flips > 1 ? " x" + flips : "")); pts += 1500f * flips; }
+            if (posePeak != Pose.None && poseTime > 0.15f)
+            {
+                parts.Add(posePeak == Pose.Superman ? "Superman" : posePeak == Pose.CanCan ? "Can-Can" : "No-Hander");
+                pts += 400f + 900f * Mathf.Min(1.5f, poseTime);
+            }
+            if (airWhipMax > 0.45f) { parts.Add(airWhipMax > 0.85f ? "Big Whip" : "Whip"); pts += 500f * airWhipMax; }
+            parts.Add(air > 1.2f ? "Big Air" : hopFlag ? "Bunny Hop" : "Air");
+            if (bailed) { pts *= 0.25f; parts.Add("(bailed)"); }
+            if (pts > 0)
+            {
+                LastTrick = string.Join(" · ", parts);
+                LastTrickPoints = Mathf.RoundToInt(pts);
+                LastTrickAge = 0;
+                Score += LastTrickPoints;
+            }
+            hopFlag = false;
+            airWhipMax = 0;
+            poseTime = 0;
+            posePeak = Pose.None;
+            airPitchAccum = 0;
+            PitchDeg = Mathf.Clamp(Mathf.DeltaAngle(0, PitchDeg), -10f, 40f);
         }
 
         void ApplyVelocity(float dt)

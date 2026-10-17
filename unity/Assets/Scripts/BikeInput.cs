@@ -17,13 +17,13 @@ namespace StarkVarg
     public class BikeInput : MonoBehaviour
     {
         public float Throttle, Brake, Steer, Lean;
-        public bool Wheelie, Boost, ResetPressed;
+        public bool Wheelie, Boost, ResetPressed, Jump, Trick;
 
         // Touch state
         public bool TouchActive { get; private set; }
         public Vector2 StickOrigin, StickPos;
         public bool StickHeld;
-        public Rect ThrottleRect, BrakeRect, WheelieRect, BoostRect, ResetRect;
+        public Rect ThrottleRect, BrakeRect, WheelieRect, BoostRect, ResetRect, JumpRect, TrickRect;
         float steerSmooth;
         int stickFinger = -1;
 
@@ -42,13 +42,15 @@ namespace StarkVarg
             WheelieRect = new Rect(BrakeRect.x, BrakeRect.y - u * 1.2f - 12, u * 1.25f, u * 1.15f);
             BoostRect = new Rect(ThrottleRect.x, ThrottleRect.y - u * 0.9f - 12, u * 1.5f, u * 0.9f);
             ResetRect = new Rect(w - u * 0.9f - 20, 20, u * 0.9f, u * 0.7f);
+            JumpRect = new Rect(WheelieRect.x, WheelieRect.y - u * 0.95f - 12, u * 1.25f, u * 0.95f);
+            TrickRect = new Rect(JumpRect.x - u * 1.25f - 14, JumpRect.y, u * 1.25f, u * 0.95f);
         }
 
         void Update()
         {
             Layout();
             float thr = 0, brk = 0, steer = 0, lean = 0;
-            bool wheelie = false, boost = false, reset = false;
+            bool wheelie = false, boost = false, reset = false, jump = false, trick = false;
 
 #if ENABLE_INPUT_SYSTEM
             var kb = Keyboard.current;
@@ -63,6 +65,8 @@ namespace StarkVarg
                 if (kb.qKey.isPressed) lean -= 1;
                 if (kb.eKey.isPressed) lean += 1;
                 if (kb.rKey.wasPressedThisFrame) reset = true;
+                if (kb.jKey.isPressed) jump = true;
+                if (kb.tKey.isPressed) trick = true;
             }
             var gp = Gamepad.current;
             if (gp != null)
@@ -75,6 +79,8 @@ namespace StarkVarg
                 wheelie |= gp.buttonSouth.isPressed;
                 boost |= gp.rightShoulder.isPressed;
                 reset |= gp.buttonNorth.wasPressedThisFrame;
+                jump |= gp.buttonEast.isPressed;
+                trick |= gp.buttonWest.isPressed;
             }
             TouchActive = ETouch.activeTouches.Count > 0 || TouchActive;
             bool stickSeen = false;
@@ -82,7 +88,7 @@ namespace StarkVarg
             {
                 // Screen coords are bottom-left origin; GUI coords top-left.
                 var p = new Vector2(t.screenPosition.x, Screen.height - t.screenPosition.y);
-                HandleTouch(t.touchId, p, t.phase == UnityEngine.InputSystem.TouchPhase.Began, ref thr, ref brk, ref wheelie, ref boost, ref reset, ref steer, ref lean, ref stickSeen);
+                HandleTouch(t.touchId, p, t.phase == UnityEngine.InputSystem.TouchPhase.Began, ref thr, ref brk, ref wheelie, ref boost, ref reset, ref jump, ref trick, ref steer, ref lean, ref stickSeen);
             }
 #else
             if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) thr = 1;
@@ -94,13 +100,15 @@ namespace StarkVarg
             if (Input.GetKey(KeyCode.Q)) lean -= 1;
             if (Input.GetKey(KeyCode.E)) lean += 1;
             if (Input.GetKeyDown(KeyCode.R)) reset = true;
+            if (Input.GetKey(KeyCode.J)) jump = true;
+            if (Input.GetKey(KeyCode.T)) trick = true;
             TouchActive = Input.touchCount > 0 || TouchActive;
             bool stickSeen = false;
             for (int i = 0; i < Input.touchCount; i++)
             {
                 var t = Input.GetTouch(i);
                 var p = new Vector2(t.position.x, Screen.height - t.position.y);
-                HandleTouch(t.fingerId, p, t.phase == UnityEngine.TouchPhase.Began, ref thr, ref brk, ref wheelie, ref boost, ref reset, ref steer, ref lean, ref stickSeen);
+                HandleTouch(t.fingerId, p, t.phase == UnityEngine.TouchPhase.Began, ref thr, ref brk, ref wheelie, ref boost, ref reset, ref jump, ref trick, ref steer, ref lean, ref stickSeen);
             }
 #endif
             if (!stickSeen)
@@ -117,10 +125,12 @@ namespace StarkVarg
             Wheelie = wheelie;
             Boost = boost;
             ResetPressed = reset;
+            Jump = jump;
+            Trick = trick;
         }
 
         void HandleTouch(int id, Vector2 p, bool began, ref float thr, ref float brk, ref bool wheelie, ref bool boost, ref bool reset,
-            ref float steer, ref float lean, ref bool stickSeen)
+            ref bool jump, ref bool trick, ref float steer, ref float lean, ref bool stickSeen)
         {
             if (ThrottleRect.Contains(p))
             {
@@ -133,6 +143,8 @@ namespace StarkVarg
             if (WheelieRect.Contains(p)) { wheelie = true; return; }
             if (BoostRect.Contains(p)) { boost = true; thr = 1; return; }
             if (ResetRect.Contains(p)) { if (began) reset = true; return; }
+            if (JumpRect.Contains(p)) { jump = true; return; }
+            if (TrickRect.Contains(p)) { trick = true; return; }
             if (began && stickFinger < 0 && p.x < Screen.width * 0.5f)
             {
                 stickFinger = id;

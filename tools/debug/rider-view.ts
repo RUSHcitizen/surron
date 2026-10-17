@@ -43,7 +43,7 @@ bike.update({ steer: Number(q.get('steer') ?? 0), frontComp: 0.05, rearComp: 0.0
 bike.root.updateMatrixWorld(true);
 bike.gripPositions(gl, gr);
 if (pose === 'rest') { /* constructor rest pose */ rider.root.matrix.makeTranslation(0, 1.2, 0); rider.root.matrixWorldNeedsUpdate = true; } else if (pose === 'tumble') rider.tumble(new Vector3(0, 1, 0), new Quaternion());
-else rider.pose(spec, (bike as unknown as { chassisGroup: { matrixWorld: Matrix4 } }).chassisGroup.matrixWorld, gl, gr, Number(q.get('shift') ?? 0), 0, Number(q.get('speed') ?? 8));
+else rider.pose(spec, (bike as unknown as { chassisGroup: { matrixWorld: Matrix4 } }).chassisGroup.matrixWorld, gl, gr, Number(q.get('shift') ?? 0), 0, Number(q.get('speed') ?? 8), 0, { stand: Number(q.get('stand') ?? 0), accel: 0, foot: 0, look: 0, groundY: -0.5, trick: { pose: (q.get('trick') ?? 'none') as 'none', amt: 1, side: Number(q.get('side') ?? 1) } });
 const cam = new PerspectiveCamera(35, innerWidth / innerHeight, 0.05, 100);
 const a = Number(q.get('a') ?? 0.8), d = Number(q.get('d') ?? 3), h = Number(q.get('h') ?? 1.4);
 cam.position.set(Math.sin(a) * d, h, Math.cos(a) * d);

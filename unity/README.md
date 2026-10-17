@@ -23,11 +23,19 @@ run Unity. Expect a round of small fixes when you first open it, and report any 
 
 - **Keyboard:** W / S throttle and brake, A / D steer, **Shift or Z: wheelie** (hold it; Q / E
   raises or lowers it), F boost, R reset.
+- **Tricks:**
+  - **J: bunny hop.** Tap for a small hop, or hold up to 0.6 s to charge and release for a big
+    one.
+  - **A / D in the air: whip.** It throws the bike sideways; it straightens itself before
+    landing.
+  - **Q / E in the air:** back and front flips.
+  - **T in the air: pose.** Superman; with A or D held, Can-Can; with E held, No-Hander. Let
+    go before landing, or it counts as a bail.
 - **Gamepad:** right and left triggers for throttle and brake, left stick to steer, A for
-  wheelie, RB for boost, Y to reset.
+  wheelie, B to jump, X for tricks, RB for boost, Y to reset.
 - **Touch** (on the phone, landscape):
   - left half: a floating stick for steering and lean;
-  - right side: THROTTLE pad, BRAKE, WHEELIE and BOOST buttons;
+  - right side: THROTTLE pad, BRAKE, WHEELIE, BOOST, JUMP and TRICK buttons;
   - RESET at the top right.
 
 ## Make it look like the real thing
@@ -73,7 +81,7 @@ Keep textures small, and use the "Brotli" compression with the matching Cloudfla
 | File | What it does |
 | --- | --- |
 | `GameBootstrap.cs` | Builds the light, fog, city, traffic, bike, camera and HUD when Play starts. Skips itself if the scene already has a `BikeController`. |
-| `BikeController.cs` | Arcade physics (Rigidbody): traction then power-limited acceleration, coordinated lean and yaw, held wheelies, boost, air pitch control, and crashes only on hits over 30 mph. |
+| `BikeController.cs` | Arcade physics (Rigidbody): traction then power-limited acceleration, coordinated lean and yaw, held wheelies, boost, crashes only on hits over 30 mph. Tricks: charged bunny hop, air whip (it straightens before touchdown), flips, Superman / Can-Can / No-Hander poses, and trick naming and scoring on landing. |
 | `BikeVisual.cs` | Lean, wheelie pitch about the rear axle, steering and wheel spin, plus the placeholder bike and rider (or your prefabs). |
 | `BikeInput.cs` | Keyboard, gamepad and multi-touch, for both the new Input System and the legacy Input Manager. |
 | `CityGenerator.cs` | Street grid with markings, kerbs, buildings with window bands, trees, lamps, and static batching. |

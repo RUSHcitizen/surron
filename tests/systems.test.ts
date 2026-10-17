@@ -183,6 +183,23 @@ describe('scoring and challenges', () => {
     run(bike, 5, (_t, b) => ({ ...emptyInput(), throttle: Math.max(0, Math.min(1, 0.65 + (0.5 - Math.abs(b.rear.slipAngle)) * 2.2 - Math.abs(b.yawRate) * 0.1)), steer: 0.7 }), (_t, b) => { sc.update(1 / 240, b); });
     expect(sc.driftTotal).toBeGreaterThan(600);
   });
+  it('names and scores tricks: bunny hop + whip + superman', () => {
+    const bike = makeBike(computeVehicleSpec(PRESETS[0]), flatWorld(4000, 'asphalt'));
+    settle(bike);
+    const cruise = (b: typeof bike) => Math.max(0, Math.min(1, (14 - b.speed) * 0.5));
+    run(bike, 20, (_t, b) => ({ ...emptyInput(), throttle: cruise(b) }), (_t, b) => b.speed >= 13.7);
+    const sc = new Scorer();
+    const names: string[] = [];
+    const step = (_t: number, b: typeof bike) => { sc.update(1 / 240, b); for (const e of sc.events) if (e.type === 'trick') names.push(e.name!); sc.events.length = 0; };
+    run(bike, 0.6, (_t, b) => ({ ...emptyInput(), throttle: cruise(b), jump: 1 }), step);
+    // Whip early in the flight, then a short superman, released before touchdown.
+    run(bike, 3, (t, b) => ({ ...emptyInput(), throttle: cruise(b), steer: t > 0.05 && t < 0.35 ? 1 : 0, trick: t > 0.4 && t < 0.75 ? 1 : 0 }), step);
+    const n = names.join(' | ');
+    expect(n).toContain('Bunny Hop');
+    expect(n).toContain('Whip');
+    expect(n).toContain('Superman');
+    expect(n).not.toContain('bailed');
+  });
   it('medal thresholds respect direction', () => {
     const drag = CHALLENGES.find((c) => c.id === 'drag')!;
     expect(medalFor(drag, 9)).toBe('gold');

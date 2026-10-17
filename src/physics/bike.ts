@@ -36,7 +36,15 @@ export interface BikeInput {
   stoppie?: number;
   /** Boost held (1): electric overboost for a few seconds (the game meters it). */
   boost?: number;
+  /** Bunny hop: hold to pre-load, release to pop (1 = held). */
+  jump?: number;
+  /** Air trick pose while airborne (1 = held); the stick picks which one. */
+  trick?: number;
 }
+
+/** Rider air-trick poses (see BikeDynamics.trickPose). */
+export type TrickPose = 'none' | 'superman' | 'cancan' | 'nohander';
+export const TRICK_NAMES: Record<Exclude<TrickPose, 'none'>, string> = { superman: 'Superman', cancan: 'Can-Can', nohander: 'No-Hander' };
 
 export function emptyInput(): BikeInput {
   return { throttle: 0, frontBrake: 0, rearBrake: 0, steer: 0, lean: 0 };
@@ -76,6 +84,7 @@ function makeWheelState(): WheelState {
 
 export type BikeEvent =
   | { type: 'land'; strength: number; surface: SurfaceId }
+  | { type: 'hop'; strength: number }
   | { type: 'bump'; strength: number; wheel: 'front' | 'rear' }
   | { type: 'crash'; speed: number; cause: string }
   | { type: 'scrape'; strength: number };
@@ -165,6 +174,25 @@ export class BikeDynamics {
   /** Values of the most recent completed airborne phase. */
   airTimeLast = 0;
   airRotLast = tv();
+  // --- Tricks ------------------------------------------------------------------------
+  /** Bunny-hop pre-load, 0..1 (how long JUMP has been held, normalised). */
+  jumpCharge = 0;
+  private jumpHeld = false;
+  private hopCooldown = 0;
+  /** The current airborne phase started with a bunny hop. */
+  private hopFlag = false;
+  private lastLandAt = -10;
+  /** Whip / flick: -1..1 sideways throw of the bike in the air (steer while airborne). */
+  whip = 0;
+  private airWhipMax = 0;
+  /** Air trick pose being held, its side (can-can) and how far into it the rider is (0..1). */
+  trickPose: TrickPose = 'none';
+  trickSide = 1;
+  trickAmt = 0;
+  private poseTime = 0;
+  private posePeak: TrickPose = 'none';
+  /** Summary of the last airborne phase, for scoring. */
+  airLast = { hop: false, whip: 0, pose: 'none' as TrickPose, poseTime: 0, bailed: false };
   time = 0;
   events: BikeEvent[] = [];
 
@@ -330,6 +358,7 @@ export class BikeDynamics {
     const wheelieBtn = !this.crashed && (input.wheelie ?? 0) > 0.5;
     const stoppieBtn = !this.crashed && !wheelieBtn && (input.stoppie ?? 0) > 0.5;
     this.wheelieHold = wheelieBtn ? this.wheelieHold + dt : 0;
+    this.stepHop(input, dt, grounded);
     this.stoppieHold = stoppieBtn ? this.stoppieHold + dt : 0;
     const TR = TUNING.tricks;
     this.trickTorque = 0;
@@ -691,6 +720,14 @@ export class BikeDynamics {
         this.wYaw = this.angVel.dot(UP);
         if (wheelieBtn && this.rear.grounded && this.pitch > 0.04) this.wheelieControl(dt, steerIn, av, true);
       }
+      if (!this.front.grounded && !this.rear.grounded) this.airTricks(dt, input, steerIn, leanIn);
+    }
+    if (this.front.grounded || this.rear.grounded || this.crashed) {
+      this.whip *= Math.max(0, 1 - 10 * dt);
+      if (this.trickPose !== 'none' || this.trickAmt > 0) {
+        this.trickAmt = Math.max(0, this.trickAmt - 8 * dt);
+        if (this.trickAmt === 0) this.trickPose = 'none';
+      }
     }
     const maxW = TUNING.body.maxAngularSpeed;
     if (this.angVel.lengthSq() > maxW * maxW) this.angVel.setLength(maxW);
@@ -716,6 +753,15 @@ export class BikeDynamics {
       this.airRot.z += leanRate * dt;
     } else if (this.airTime > 0) {
       if (this.airTime > 0.25) this.events.push({ type: 'land', strength: this.maxImpact, surface: this.rear.surface });
+      // Trick summary for scoring: still in a pose at touchdown = bailed.
+      // (A rebound just after a landing is not a new jump: keep the jump's summary.)
+      const bounce = this.time - this.lastLandAt < 0.6;
+      this.lastLandAt = this.time;
+      if (this.airTime > 0.2 && !bounce) this.airLast = { hop: this.hopFlag, whip: this.airWhipMax, pose: this.posePeak, poseTime: this.poseTime, bailed: this.trickAmt > 0.45 };
+      this.hopFlag = false;
+      this.airWhipMax = 0;
+      this.posePeak = 'none';
+      this.poseTime = 0;
       this.airTimeLast = this.airTime;
       this.airRotLast.copy(this.airRot);
       this.airTime = 0;
@@ -1048,6 +1094,92 @@ export class BikeDynamics {
     _tmp.set(-_hf.z, 0, _hf.x);
     const vLat = this.vel.dot(_tmp);
     if (this.vel.x * _hf.x + this.vel.z * _hf.z > 0) this.vel.addScaledVector(_tmp, -vLat * Math.min(1, 4 * w * dt));
+  }
+
+  /**
+   * Bunny hop: holding JUMP pre-loads (the rider sinks into the suspension), releasing pops
+   * the bike up, front first. A tap gives a small hop (~0.5 m), a full 0.6 s charge about
+   * 1.5 m: enough to clear a kerb, a bench or the bonnet of a car.
+   */
+  private stepHop(input: BikeInput, dt: number, grounded: boolean) {
+    const held = !this.crashed && (input.jump ?? 0) > 0.5;
+    this.hopCooldown = Math.max(0, this.hopCooldown - dt);
+    if (held) this.jumpCharge = Math.min(1, this.jumpCharge + dt / 0.6);
+    if (!held && this.jumpHeld && grounded && this.hopCooldown <= 0) {
+      const k = this.jumpCharge;
+      _tmp.copy(this.front.grounded ? this.front.normal : this.rear.normal);
+      if (_tmp.lengthSq() < 0.5) _tmp.copy(UP);
+      const up = 3.3 + 2.3 * k;
+      const vn = this.vel.dot(_tmp);
+      if (vn < up) this.vel.addScaledVector(_tmp, up - Math.max(0, vn));
+      // Front comes up first, like a real hop (pull on the bars, then push).
+      _left.set(1, 0, 0).applyQuaternion(this.quat);
+      this.angVel.addScaledVector(_left, -(1.1 + 0.8 * k));
+      this.hopCooldown = 0.35;
+      this.hopFlag = true;
+      this.events.push({ type: 'hop', strength: k });
+    }
+    if (!held) this.jumpCharge = Math.max(0, this.jumpCharge - dt * 4);
+    this.jumpHeld = held;
+  }
+
+  /**
+   * Arcade air tricks:
+   *  - Whip / flick: steering in the air throws the bike sideways (laid over and turned across
+   *    the flight path); it straightens itself as the ground comes up, so it always lands.
+   *  - Poses (TRICK held): Superman (legs off the back), Can-Can (a leg over the seat; steer
+   *    picks the side) and No-Hander (lean forward). Still in a pose at touchdown = bailed.
+   */
+  private airTricks(dt: number, input: BikeInput, steerIn: number, leanIn: number) {
+    const trickBtn = (input.trick ?? 0) > 0.5 && this.airTime > 0.12;
+    if (trickBtn && this.trickPose === 'none') {
+      if (leanIn > 0.4) this.trickPose = 'nohander';
+      else if (Math.abs(steerIn) > 0.4) { this.trickPose = 'cancan'; this.trickSide = Math.sign(steerIn); }
+      else this.trickPose = 'superman';
+    }
+    if (trickBtn) this.trickAmt = Math.min(1, this.trickAmt + 5 * dt);
+    else {
+      this.trickAmt = Math.max(0, this.trickAmt - 6 * dt);
+      if (this.trickAmt === 0) this.trickPose = 'none';
+    }
+    if (this.trickAmt > 0.7) {
+      this.poseTime += dt;
+      if (this.trickPose !== 'none') this.posePeak = this.trickPose;
+    }
+    // Whip: ease toward the steer (not while posing), back to straight near the ground.
+    // Time until touchdown (ballistic, flat ground below): straighten up for the last 0.45 s.
+    const g = TUNING.gravity;
+    const hGround = Math.max(0, this.pos.y - this.world.heightAt(this.pos.x, this.pos.z) - this.rideHeight());
+    const tLand = (this.vel.y + Math.sqrt(this.vel.y * this.vel.y + 2 * g * hGround)) / g;
+    const landing = tLand < 0.45;
+    const target = trickBtn || landing || Math.abs(steerIn) < 0.25 ? 0 : steerIn;
+    this.whip += (target - this.whip) * Math.min(1, (target !== 0 ? 4.5 : landing ? 11 : 6) * dt);
+    if (Math.abs(this.whip) < 0.02 && target === 0) return;
+    // Lay the bike over (roll), turn it across the flight path (yaw) and keep the nose on the
+    // trajectory (pitch). The angular velocity is split into yaw / pitch / roll rates (as in
+    // wheelieControl) so the three never fight; the blend fades out with the whip.
+    _fwd.set(0, 0, 1).applyQuaternion(this.quat);
+    _hf.set(_fwd.x, 0, _fwd.z);
+    if (_hf.lengthSq() < 1e-4) return;
+    _hf.normalize();
+    _lh.set(_hf.z, 0, -_hf.x);
+    _m3.set(UP.x, _lh.x, _fwd.x, UP.y, _lh.y, _fwd.y, UP.z, _lh.z, _fwd.z);
+    if (Math.abs(_m3.determinant()) < 0.05) return;
+    _m3.invert();
+    _rates.copy(this.angVel).applyMatrix3(_m3);
+    const w = Math.min(1, Math.abs(this.whip) * 4);
+    const yawNow = Math.atan2(_fwd.x, _fwd.z);
+    const hv = Math.hypot(this.vel.x, this.vel.z);
+    const yawPath = hv > 2 ? Math.atan2(this.vel.x, this.vel.z) : yawNow;
+    let err = yawPath - this.whip * 0.55 - yawNow;
+    err = Math.atan2(Math.sin(err), Math.cos(err));
+    const pitchPath = Math.atan2(this.vel.y, Math.max(hv, 1)) * 0.8;
+    const want = [clamp(err * 6, -6, 6), -clamp((pitchPath - this.pitch) * 5, -4, 4), clamp((this.whip * 1.05 - this.lean) * 7, -6, 6)];
+    _rates.x += (want[0] - _rates.x) * w;
+    _rates.y += (want[1] - _rates.y) * w;
+    _rates.z += (want[2] - _rates.z) * w;
+    this.angVel.set(0, 0, 0).addScaledVector(UP, _rates.x).addScaledVector(_lh, _rates.y).addScaledVector(_fwd, _rates.z);
+    this.airWhipMax = Math.max(this.airWhipMax, Math.abs(this.lean));
   }
 
   private turnAssist(dt: number, steerIn: number, av: number) {

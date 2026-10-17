@@ -312,6 +312,11 @@ table.cmp td.best { color: var(--accent); font-weight: 700; }
 }
 /* Trick buttons sit above the brakes. The wheelie button fills with the wheelie height. */
 .t-wheelie { grid-column: 1; grid-row: 2; }
+.t-jump { grid-column: 1; grid-row: 1; border-color: rgba(255, 176, 32, 0.6); }
+.t-jump::before { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--hold, 0) * 100%); background: linear-gradient(to top, rgba(255, 176, 32, 0.6), rgba(255, 220, 120, 0.35)); z-index: -1; pointer-events: none; }
+.t-air { grid-column: 2; grid-row: 1; border-color: rgba(190, 120, 255, 0.6); }
+.t-air.pressed { background: rgba(190, 120, 255, 0.4); border-color: #c79bff; }
+.t-jump small, .t-air small { font-size: 7.5px; }
 .t-stoppie { grid-column: 2; grid-row: 2; }
 /* Boost sits above the throttle; its fill shows the charge left. */
 .t-boost { grid-column: 3; grid-row: 1; position: relative; overflow: hidden; isolation: isolate; border-color: rgba(64, 196, 255, 0.6); font-size: 12px; letter-spacing: 0.1em; }

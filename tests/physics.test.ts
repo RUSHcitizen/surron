@@ -353,6 +353,44 @@ describe('trick buttons', () => {
     expect(bike.crashed).toBe(true);
     expect(bike.crashCause).toBe('looped out');
   });
+  it('bunny hop: a tap hops ~0.6 m, a full pre-load ~1.6 m, landing cleanly', () => {
+    for (const [hold, lo, hi] of [[0.05, 0.4, 0.9], [0.6, 1.3, 2.0]] as const) {
+      const bike = rolling(8);
+      const y0 = bike.pos.y;
+      let maxH = 0;
+      run(bike, hold, (_t, b) => ({ ...emptyInput(), throttle: cruise(8)(b), jump: 1 }));
+      run(bike, 2.5, (_t, b) => ({ ...emptyInput(), throttle: cruise(8)(b) }), (_t, b) => { maxH = Math.max(maxH, b.pos.y - y0); });
+      expect(maxH, `hold ${hold}`).toBeGreaterThan(lo);
+      expect(maxH, `hold ${hold}`).toBeLessThan(hi);
+      expect(bike.crashed).toBe(false);
+      expect(bike.airLast.hop).toBe(true);
+      expect(Math.abs(bike.lean)).toBeLessThan(0.1);
+    }
+  });
+  it('whip: steering in the air lays the bike over and it lands straight, on every bike at speed', () => {
+    for (const p of PRESETS) {
+      const bike = makeBike(computeVehicleSpec(p), flatWorld(4000, 'asphalt'));
+      settle(bike);
+      run(bike, 20, (_t, b) => ({ ...emptyInput(), throttle: cruise(20)(b) }), (_t, b) => b.speed >= 19.7);
+      run(bike, 0.6, (_t, b) => ({ ...emptyInput(), throttle: cruise(20)(b), jump: 1 }));
+      run(bike, 3, (t, b) => ({ ...emptyInput(), throttle: cruise(20)(b), steer: t > 0.1 && t < 0.7 ? 1 : 0 }));
+      expect(bike.airLast.whip, p.id).toBeGreaterThan(0.7);
+      expect(bike.crashed, p.id).toBe(false);
+      expect(Math.abs(bike.lean), p.id).toBeLessThan(0.15);
+      expect(bike.speed, p.id).toBeGreaterThan(15);
+    }
+  });
+  it('air poses: held and released in time scores the pose; still posing at touchdown is a bail', () => {
+    for (const [release, bailed] of [[0.6, false], [3, true]] as const) {
+      const bike = rolling(8);
+      run(bike, 0.6, (_t, b) => ({ ...emptyInput(), throttle: cruise(8)(b), jump: 1 }));
+      run(bike, 3, (t, b) => ({ ...emptyInput(), throttle: cruise(8)(b), trick: t > 0.15 && t < release ? 1 : 0 }));
+      expect(bike.airLast.pose).toBe('superman');
+      expect(bike.airLast.poseTime).toBeGreaterThan(0.2);
+      expect(bike.airLast.bailed).toBe(bailed);
+      expect(bike.crashed).toBe(false);
+    }
+  });
   it('the stoppie button lifts the rear while braking', () => {
     const bike = rolling(11.5);
     let minP = 0;
