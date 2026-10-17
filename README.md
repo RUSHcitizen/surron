@@ -11,6 +11,11 @@ to acceleration, grip, suspension, wheelies and drifts. No accounts, no servers,
 Electric only: no combustion engines and no gear shifting; even the city traffic is electric cars. All models, textures and sounds are procedurally
 generated, so there are no downloaded asset packs.
 
+
+> **Unity version:** a Unity port lives in [`unity/`](unity/README.md). It's a first playable that builds itself on Play,
+> compiled against the Unity API here but not yet run in the Unity Editor. Open it with Unity Hub, and drop in your own
+> bike and rider models.
+
 ## Run it
 
 ```bash
