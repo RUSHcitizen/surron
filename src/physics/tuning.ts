@@ -11,6 +11,8 @@ export const TUNING = {
   /** Wheel-spin sub-iterations per physics step (stiff tire/wheel coupling). */
   wheelSubsteps: 6,
   gravity: 9.81,
+  /** Boost surge: extra push along the heading while boosting (m/s²). */
+  boostPush: 3.2,
   airDensity: 1.2,
 
   tire: {

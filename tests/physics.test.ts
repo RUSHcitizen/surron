@@ -394,6 +394,19 @@ describe('arcade crash rule (default)', () => {
     }
   });
 
+  it('boost adds a real surge: quicker to 100 km/h and a higher top speed while held', () => {
+    const go = (boost: number) => {
+      const bike = makeBike(computeVehicleSpec(PRESETS[0]), flatWorld(6000));
+      settle(bike);
+      let t100 = Infinity;
+      run(bike, 12, () => ({ ...emptyInput(), throttle: 1, boost }), (t, b) => { if (t100 === Infinity && b.speed * 3.6 >= 100) t100 = t; });
+      return { t100, v: bike.speed };
+    };
+    const a = go(0), b = go(1);
+    expect(b.t100).toBeLessThan(a.t100);
+    expect(b.v).toBeGreaterThan(a.v * 1.08);
+  });
+
   it('holding full throttle (no lean) drives forward cleanly: no accidental wheelie, no throttle chatter', () => {
     for (const p of PRESETS) {
       const bike = makeBike(computeVehicleSpec(p), flatWorld(4000));

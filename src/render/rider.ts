@@ -569,14 +569,17 @@ export class RiderModel {
    * Pose in the bike's chassis frame, then transform into world via `chassisWorld`.
    * hip/grips/pegs are chassis-local.
    */
-  pose(spec: VehicleSpec, chassisWorld: Matrix4, gripL: Vector3, gripR: Vector3, shift: number, lat: number, speed: number) {
+  pose(spec: VehicleSpec, chassisWorld: Matrix4, gripL: Vector3, gripR: Vector3, shift: number, lat: number, speed: number, lean = 0) {
     const G = spec.geo;
     const j = this.j;
     const crouch = Math.min(1, Math.abs(speed) / 18);
-    j.hip.set(G.riderHip.x + lat * 0.07, G.riderHip.y + 0.03 + shift * -0.03, G.riderHip.z - 0.06 + shift * 0.12);
+    // Hanging off: in a lean the rider slides the hips and drops the shoulders to the inside
+    // (bike +x is its left, and a positive lean is to the right).
+    const hang = Math.max(-1, Math.min(1, lean / 0.8)) * Math.min(1, Math.abs(speed) / 6);
+    j.hip.set(G.riderHip.x + lat * 0.07 - hang * 0.075, G.riderHip.y + 0.03 + shift * -0.03 - Math.abs(hang) * 0.02, G.riderHip.z - 0.06 + shift * 0.12);
     // Torso leans toward the bars, more when crouched/shifted forward; sits up in a wheelie.
     const pitch = 0.62 + crouch * 0.18 + shift * 0.4;
-    const roll = lat * 0.25;
+    const roll = lat * 0.25 - hang * 0.32;
     j.neck.set(Math.sin(roll) * LIMB.torso + j.hip.x, j.hip.y + Math.cos(pitch) * LIMB.torso, j.hip.z + Math.sin(pitch) * LIMB.torso);
     spineMid(j);
     j.head.copy(j.neck).add(this.v.set(0, 0.135, 0.07));

@@ -94,6 +94,8 @@ export class Game {
   private launch = { armed: false, t: 0, done: false };
   private frameTimes: number[] = [];
   private lastCarBump = -10;
+  /** Boost charge 0..1: drains while boosting, refills slowly, and from tricks and near misses. */
+  boostMeter = 1;
   private collected = new Set<string>();
   quality: Quality = QUALITY.high;
   private contextLost = false;
@@ -389,7 +391,7 @@ export class Game {
       const riding = this.state === 'ride' && !this.bike.crashed;
       const v = riding ? Math.abs(this.bike.speed) : 0;
       // Speed blur from ~80 km/h, full by ~230 km/h.
-      const target = riding ? Math.max(0, Math.min(1, (v - 22) / 42)) : 0;
+      const target = riding ? Math.max(0, Math.min(1, (v - 22) / 42 + this.bike.pt.boostLevel * 0.45)) : 0;
       p.blur += (target - p.blur) * 0.1;
       p.bloomStrength = this.settings.timeOfDay === 'night' ? 0.95 : this.settings.timeOfDay === 'sunset' ? 0.7 : 0.5;
       p.render(this.renderer, this.scene, this.camera, this.time);
@@ -528,6 +530,7 @@ export class Game {
       if (e.type === 'horn') this.audio.horn(1 / (1 + d / 12));
       else if (e.type === 'nearMiss' && !b.crashed) {
         this.scorer.bonus('Near miss', 150);
+        this.boostMeter = Math.min(1, this.boostMeter + 0.2);
         this.ui.toast('Near miss! +150');
       }
     }
@@ -594,6 +597,11 @@ export class Game {
     this.acc += dt;
     let steps = 0;
     const bInput = { ...inp.state };
+    // Boost: flat-out overboost while held and charged.
+    const boosting = inp.state.boost > 0 && this.boostMeter > 0.01 && !this.bike.crashed;
+    bInput.boost = boosting ? 1 : 0;
+    if (boosting) bInput.throttle = 1;
+    this.boostMeter = Math.max(0, Math.min(1, this.boostMeter + (boosting ? -0.2 : 0.02) * dt));
     while (this.acc >= TUNING.dt && steps < 40) {
       this.bike.step(bInput);
       this.acc -= TUNING.dt;
@@ -631,11 +639,14 @@ export class Game {
 
     // Systems
     this.scorer.update(dt, this.bike);
+    // Tricks charge the boost (the HUD shows and clears the events afterwards).
+    for (const e of this.scorer.events) if (e.type === 'trick') this.boostMeter = Math.min(1, this.boostMeter + e.points / 1200);
     if (this.challenge) this.challenge.update(dt, { bike: this.bike, data: this.data, scorer: this.scorer, view: this.view });
     this.effects(dt);
     this.gameplayChecks(dt);
     this.updateEnvironment(dt);
     _v.copy(this.renderPos);
+    this.cam.boost = this.bike.pt.boostLevel;
     this.cam.update(dt, this.renderPos, this.renderQuat, this.bike.vel, this.helmetPos(_v2), this.bike.crashed);
     const b = this.bike;
     const pt = b.pt;
@@ -655,6 +666,7 @@ export class Game {
     if (this.touch.isVisible) {
       // Danger meter: full at roughly the hold time where the bikes loop out (~2.8 s).
       this.touch.setWheelieHold(b.wheelieHold > 0 ? (b.wheelieHold - 0.6) / 2.2 : 0);
+      this.touch.setBoost(this.boostMeter);
     }
     this.ui.hud.update(dt);
   }
@@ -682,7 +694,7 @@ export class Game {
     } else {
       this.model.gripPositions(_gl, _gr);
       _m.copy(this.model.chassisGroup.matrixWorld);
-      this.model.rider.pose(this.spec, _m, _gl, _gr, b.riderShift, b.riderLat, b.speed);
+      this.model.rider.pose(this.spec, _m, _gl, _gr, b.riderShift, b.riderLat, b.speed, b.lean);
     }
     this.model.lightAnchor.getWorldPosition(this.headlight.position);
     this.headlight.target = this.model.lightTarget;

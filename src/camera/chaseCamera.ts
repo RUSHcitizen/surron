@@ -29,6 +29,10 @@ export class ChaseCamera {
   private trickSide = 1;
   private hit = makeHit();
   private initialized = false;
+  /** 0..1 boost surge (wider view, camera drops back a touch). */
+  boost = 0;
+  /** Camera roll that follows part of the bike's lean (rad), smoothed. */
+  private roll = 0;
 
   constructor(public camera: PerspectiveCamera, private world: CollisionWorld) {}
 
@@ -159,7 +163,13 @@ export class ChaseCamera {
     }
     cam.lookAt(_t);
     // Wider view as speed builds (strongest sense of speed at Hyper-mode velocities).
-    cam.fov = this.fovBase + Math.min(20, speed * 0.25 + Math.max(0, speed - 30) * 0.12);
+    // Lean the view with the bike a little: it flows through corners instead of staying bolted level.
+    _p.set(1, 0, 0).applyQuaternion(bikeQuat);
+    const lean = crashed ? 0 : Math.asin(Math.max(-1, Math.min(1, _p.y)));
+    this.roll += (lean * 0.22 - this.roll) * Math.min(1, 5 * dt);
+    cam.rotateZ(-this.roll);
+    // Wider view as speed builds (strongest sense of speed at Hyper-mode velocities), plus a boost kick.
+    cam.fov = this.fovBase + Math.min(20, speed * 0.25 + Math.max(0, speed - 30) * 0.12) + this.boost * 9;
     cam.updateProjectionMatrix();
     this.initialized = true;
   }

@@ -4,11 +4,11 @@
  */
 export type Action =
   | 'throttle' | 'frontBrake' | 'rearBrake' | 'steerLeft' | 'steerRight' | 'leanForward' | 'leanBack'
-  | 'wheelie' | 'stoppie' | 'reset' | 'camera' | 'pause' | 'garage' | 'mode' | 'hud' | 'lights';
+  | 'wheelie' | 'stoppie' | 'boost' | 'reset' | 'camera' | 'pause' | 'garage' | 'mode' | 'hud' | 'lights';
 
 export const ACTION_LABELS: Record<Action, string> = {
   throttle: 'Throttle', frontBrake: 'Front brake', rearBrake: 'Rear brake', steerLeft: 'Steer left', steerRight: 'Steer right',
-  leanForward: 'Lean forward', leanBack: 'Lean back / wheelie', wheelie: 'Wheelie (hold — too long loops out!)', stoppie: 'Stoppie (hold)', reset: 'Reset bike', camera: 'Change camera', pause: 'Pause',
+  leanForward: 'Lean forward', leanBack: 'Lean back / wheelie', wheelie: 'Wheelie (hold — too long loops out!)', stoppie: 'Stoppie (hold)', boost: 'Boost (hold)', reset: 'Reset bike', camera: 'Change camera', pause: 'Pause',
   garage: 'Garage', mode: 'Ride mode', hud: 'Toggle HUD', lights: 'Headlight',
 };
 
@@ -24,6 +24,7 @@ export const DEFAULT_BINDINGS: Bindings = {
   leanBack: ['KeyQ', 'ShiftLeft', 'ShiftRight'],
   wheelie: ['KeyZ'],
   stoppie: ['KeyX'],
+  boost: ['KeyF'],
   reset: ['KeyR'],
   camera: ['KeyC'],
   pause: ['Escape', 'KeyP'],
@@ -42,6 +43,7 @@ export interface ControlState {
   /** Trick buttons, 0/1 while held. */
   wheelie: number;
   stoppie: number;
+  boost: number;
 }
 
 /** Analog values written by the touch overlay (null when not touching). */
@@ -53,6 +55,7 @@ export interface TouchAxes {
   lean: number | null;
   wheelie: number;
   stoppie: number;
+  boost: number;
 }
 
 const EDGE: Action[] = ['reset', 'camera', 'pause', 'garage', 'mode', 'hud', 'lights'];
@@ -61,8 +64,8 @@ export class Input {
   bindings: Bindings = structuredClone(DEFAULT_BINDINGS);
   private down = new Set<string>();
   private pressed = new Set<Action>();
-  state: ControlState = { throttle: 0, frontBrake: 0, rearBrake: 0, steer: 0, lean: 0, wheelie: 0, stoppie: 0 };
-  touch: TouchAxes = { throttle: 0, frontBrake: 0, rearBrake: 0, steer: null, lean: null, wheelie: 0, stoppie: 0 };
+  state: ControlState = { throttle: 0, frontBrake: 0, rearBrake: 0, steer: 0, lean: 0, wheelie: 0, stoppie: 0, boost: 0 };
+  touch: TouchAxes = { throttle: 0, frontBrake: 0, rearBrake: 0, steer: null, lean: null, wheelie: 0, stoppie: 0, boost: 0 };
   steerSensitivity = 1;
   enabled = true;
   /** Mouse drag orbit for the camera (pixels since last read). */
@@ -157,7 +160,7 @@ export class Input {
     let gp: Gamepad | null = null;
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     for (const p of pads) if (p && p.connected) { gp = p; break; }
-    let gThrottle = 0, gFront = 0, gRear = 0, gSteer = 0, gLean = 0, gWheelie = 0, gStoppie = 0;
+    let gThrottle = 0, gFront = 0, gRear = 0, gSteer = 0, gLean = 0, gWheelie = 0, gStoppie = 0, gBoost = 0;
     if (gp) {
       const ax = (i: number) => (Math.abs(gp!.axes[i] ?? 0) > 0.12 ? gp!.axes[i] : 0);
       const btn = (i: number) => gp!.buttons[i]?.value ?? 0;
@@ -176,6 +179,7 @@ export class Input {
       if ((gp.buttons[4]?.value ?? 0) > 0.5) gLean = -1;
       gWheelie = (gp.buttons[0]?.value ?? 0) > 0.5 ? 1 : 0; // A
       gStoppie = (gp.buttons[10]?.value ?? 0) > 0.5 ? 1 : 0; // left stick click
+      gBoost = (gp.buttons[11]?.value ?? 0) > 0.5 ? 1 : 0; // right stick click
     }
     const approach = (cur: number, target: number, up: number, down: number) => {
       const r = target > cur ? up : down;
@@ -217,6 +221,7 @@ export class Input {
     s.lean = approach(s.lean, leanT, 7, 7);
     s.wheelie = Math.max(kb && this.isDown('wheelie') ? 1 : 0, gWheelie, t.wheelie);
     s.stoppie = Math.max(kb && this.isDown('stoppie') ? 1 : 0, gStoppie, t.stoppie);
+    s.boost = Math.max(kb && this.isDown('boost') ? 1 : 0, gBoost, t.boost);
   }
 
   readOrbit() {

@@ -23,6 +23,8 @@ export interface PowertrainInput {
   dt: number;
   /** 0..1: rider-assist launch traction (riding straight); trims torque to what the tyre holds. */
   launch?: number;
+  /** Boost held (0/1): overboost (more torque, power and motor speed) while held. */
+  boost?: number;
   /** Rider is deliberately wheelieing (trick button): wheelie control stays out of it. */
   wheelieOverride?: boolean;
 }
@@ -48,6 +50,8 @@ export class Powertrain {
   wcActive = false;
   limiter: '' | 'power' | 'speed' | 'thermal' | 'battery' | 'traction' | 'wheelie' = '';
   mode: RideMode = 'standard';
+  /** 0..1, eased toward the boost input (the surge builds and fades over a fraction of a second). */
+  boostLevel = 0;
   drain: DrainMode = 'realistic';
 
   constructor(public spec: PowertrainSpec) {
@@ -56,6 +60,7 @@ export class Powertrain {
 
   reset(full = false) {
     this.torque = 0;
+    this.boostLevel = 0;
     if (full) {
       this.soc = 1;
       this.motorTemp = 30;
@@ -76,12 +81,12 @@ export class Powertrain {
   }
 
   /** Available motor shaft torque (N·m) at motor speed `wm` — used by the dyno chart too. */
-  availableTorque(wm: number, mode: RideMode = this.mode, voltage = this.openCircuitVoltage(), derate = 1) {
+  availableTorque(wm: number, mode: RideMode = this.mode, voltage = this.openCircuitVoltage(), derate = 1, boost = 0) {
     const m = RIDE_MODES[mode];
-    const tPeak = this.spec.peakTorque * m.torque * derate;
-    const w0 = this.noLoadOmega(voltage) * m.speed;
+    const tPeak = this.spec.peakTorque * m.torque * derate * (1 + 0.25 * boost);
+    const w0 = this.noLoadOmega(voltage) * m.speed * (1 + 0.3 * boost);
     const fade = Math.max(0, Math.min(1, (w0 - Math.abs(wm)) / (0.18 * w0)));
-    const pMech = this.spec.maxPower * m.power * this.spec.efficiency * derate;
+    const pMech = this.spec.maxPower * m.power * this.spec.efficiency * derate * (1 + 0.9 * boost);
     const tPow = pMech / Math.max(Math.abs(wm), 1);
     return Math.max(0, Math.min(tPeak, tPeak * fade, tPow));
   }
@@ -111,7 +116,9 @@ export class Powertrain {
 
     const vOc = this.openCircuitVoltage();
     this.voltage = Math.max(sp.voltage * 0.6, vOc - this.current * sp.resistance);
-    let avail = this.availableTorque(wm, this.mode, this.voltage, this.derate);
+    const bt = i.boost ? 1 : 0;
+    this.boostLevel += Math.max(-3 * i.dt, Math.min(4 * i.dt, bt - this.boostLevel));
+    let avail = this.availableTorque(wm, this.mode, this.voltage, this.derate, this.boostLevel);
     this.limiter = '';
     if (this.derate < 0.98) this.limiter = 'thermal';
     // Battery protection

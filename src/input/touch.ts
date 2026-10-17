@@ -14,7 +14,7 @@
 import type { Action, Input } from './input';
 
 type Zone = 'stick' | 'cluster' | 'orbit';
-type Sub = 'throttle' | 'front' | 'rear' | 'wheelie' | 'stoppie' | null;
+type Sub = 'throttle' | 'front' | 'rear' | 'wheelie' | 'stoppie' | 'boost' | null;
 type Btn = Exclude<Sub, null>;
 
 interface Ptr {
@@ -51,6 +51,7 @@ export class TouchControls {
         <div class="t-stick"><div class="t-stick-base"></div><div class="t-knob"></div><span class="t-hint">STEER · LEAN</span></div>
       </div>
       <div class="t-right" data-zone="cluster">
+        <div class="t-btn t-boost" data-sub="boost">BOOST</div>
         <div class="t-btn t-trick t-wheelie" data-sub="wheelie">WHEELIE<small>hold · not too long!</small></div>
         <div class="t-btn t-trick t-stoppie" data-sub="stoppie">STOPPIE<small>hold</small></div>
         <div class="t-btn t-rear" data-sub="rear">REAR<small>brake</small></div>
@@ -74,6 +75,7 @@ export class TouchControls {
       rear: this.el.querySelector('.t-rear')!,
       wheelie: this.el.querySelector('.t-wheelie')!,
       stoppie: this.el.querySelector('.t-stoppie')!,
+      boost: this.el.querySelector('.t-boost')!,
     };
     for (const z of this.el.querySelectorAll<HTMLElement>('[data-zone]')) {
       z.addEventListener('pointerdown', (e) => this.onDown(e, z.dataset.zone as Zone));
@@ -123,7 +125,7 @@ export class TouchControls {
     this.ptrs.clear();
     this.stickPtr = -1;
     const t = this.input.touch;
-    t.throttle = t.frontBrake = t.rearBrake = t.wheelie = t.stoppie = 0;
+    t.throttle = t.frontBrake = t.rearBrake = t.wheelie = t.stoppie = t.boost = 0;
     t.steer = t.lean = null;
     this.resetStickVisual();
     this.refreshCluster();
@@ -157,7 +159,7 @@ export class TouchControls {
       this.stickBase.classList.add('pressed');
     } else if (zone === 'cluster') {
       const rr = (k: Btn) => this.btn[k].getBoundingClientRect();
-      this.rects = { throttle: rr('throttle'), front: rr('front'), rear: rr('rear'), wheelie: rr('wheelie'), stoppie: rr('stoppie') };
+      this.rects = { throttle: rr('throttle'), front: rr('front'), rear: rr('rear'), wheelie: rr('wheelie'), stoppie: rr('stoppie'), boost: rr('boost') };
     }
     this.ptrs.set(e.pointerId, p);
     this.apply(e.pointerId, p, e.clientX, e.clientY);
@@ -227,8 +229,19 @@ export class TouchControls {
     const exact = (b: DOMRect) => x >= b.left && x <= b.right && y >= b.top && y <= b.bottom;
     if (exact(r.wheelie)) return 'wheelie';
     if (exact(r.stoppie)) return 'stoppie';
+    if (exact(r.boost)) return 'boost';
     return null;
   }
+
+  /** 0..1 boost charge shown as a fill on the BOOST button. */
+  setBoost(f: number) {
+    const v = Math.max(0, Math.min(1, f)).toFixed(2);
+    if (v !== this.lastBoost) {
+      this.lastBoost = v;
+      this.btn.boost.style.setProperty('--charge', v);
+    }
+  }
+  private lastBoost = '';
 
   /** 0..1 danger meter on the wheelie button (1 = about to loop out). */
   setWheelieHold(f: number) {
@@ -243,13 +256,18 @@ export class TouchControls {
   /** Aggregate all cluster pointers into throttle/brake values and button highlights. */
   private refreshCluster() {
     const t = this.input.touch;
-    let thr = 0, front = 0, rear = 0, wheelie = 0, stoppie = 0;
+    let thr = 0, front = 0, rear = 0, wheelie = 0, stoppie = 0, boost = 0;
     for (const p of this.ptrs.values()) {
       if (p.zone !== 'cluster' || !p.sub) continue;
       if (p.sub === 'front') front = 1;
       else if (p.sub === 'rear') rear = 1;
       else if (p.sub === 'wheelie') wheelie = 1;
       else if (p.sub === 'stoppie') stoppie = 1;
+      else if (p.sub === 'boost') {
+        // Boost keeps full throttle on: a thumb on BOOST rides flat out.
+        boost = 1;
+        thr = 1;
+      }
       else if (this.rects) {
         const r = this.rects.throttle;
         const f = 1 - (p.y - r.top) / r.height;
@@ -262,6 +280,8 @@ export class TouchControls {
     t.rearBrake = rear;
     t.wheelie = wheelie;
     t.stoppie = stoppie;
+    t.boost = boost;
+    this.btn.boost.classList.toggle('pressed', boost > 0);
     this.btn.wheelie.classList.toggle('pressed', wheelie > 0);
     this.btn.stoppie.classList.toggle('pressed', stoppie > 0);
     this.fill.style.height = `${thr * 100}%`;

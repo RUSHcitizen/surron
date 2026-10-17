@@ -1,4 +1,5 @@
 /** In-ride HUD. Updates text at ~15 Hz and bars every frame to keep DOM work cheap. */
+import { RIDE_MODES } from '../physics/tuning';
 import type { Game } from '../game/game';
 import { h } from './dom';
 
@@ -117,9 +118,10 @@ export class Hud {
     const v = Math.abs(b.speed) * (mph ? 2.237 : 3.6);
     this.speed.textContent = v.toFixed(0);
     this.unit.textContent = mph ? 'mph' : 'km/h';
-    this.mode.textContent = pt.mode === 'eco' ? 'ECO' : pt.mode === 'standard' ? 'STD' : 'SPORT';
+    this.mode.textContent = RIDE_MODES[pt.mode].label;
     this.mode.className = 'hud-mode ' + pt.mode;
     const flags: string[] = [];
+    if (pt.boostLevel > 0.3) flags.push('BOOST');
     if (pt.tcActive) flags.push('TC');
     if (pt.wcActive) flags.push('WHEELIE CTRL');
     if (pt.limiter === 'thermal') flags.push('HOT — DERATING');

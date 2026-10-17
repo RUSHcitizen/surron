@@ -34,6 +34,8 @@ export interface BikeInput {
   /** Wheelie / stoppie trick buttons (held = 1). Optional: plain riding leaves them out. */
   wheelie?: number;
   stoppie?: number;
+  /** Boost held (1): electric overboost for a few seconds (the game meters it). */
+  boost?: number;
 }
 
 export function emptyInput(): BikeInput {
@@ -523,6 +525,7 @@ export class BikeDynamics {
       wheelOmega: this.rear.omega,
       rearSlip: this.rear.slipRatio,
       wheelieOverride: wheelieBtn,
+      boost: this.crashed ? 0 : (input.boost ?? 0),
       launch: this.crashed || wheelieBtn ? 0
         : this.assist * (1 - smoothstep(0.15, 0.45, Math.max(Math.abs(steerIn), Math.abs(this.lean) * 2))),
       pitch: this.pitch,
@@ -554,6 +557,11 @@ export class BikeDynamics {
     _r.set(lat, 0, shift).applyQuaternion(this.quat);
     _tmp2.set(0, -m * g, 0);
     torque.add(_r.cross(_tmp2));
+
+    // --- Boost: on top of the extra motor output (which the tyre can't always use) an
+    // arcade surge pushes the bike along, so a boost is felt at any speed.
+    const bl = this.pt.boostLevel;
+    if (bl > 0 && this.rear.grounded && !this.crashed) force.addScaledVector(_hf, m * TUNING.boostPush * bl);
 
     // --- Aero ---------------------------------------------------------------
     const vmag = this.vel.length();
