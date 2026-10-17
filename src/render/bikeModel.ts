@@ -3,11 +3,11 @@
  * so every geometric change (wheel size, swingarm, fork, battery, gearing...) is visible.
  */
 import {
-  BoxGeometry, CapsuleGeometry, CatmullRomCurve3, Float32BufferAttribute, CircleGeometry, Curve, CylinderGeometry, DoubleSide, ExtrudeGeometry,
+  BoxGeometry, BufferGeometry, CapsuleGeometry, CatmullRomCurve3, Float32BufferAttribute, CircleGeometry, Curve, CylinderGeometry, DoubleSide, ExtrudeGeometry,
   Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, Object3D, Quaternion,
   Shape, SphereGeometry, TorusGeometry, TubeGeometry, Vector2, Vector3,
 } from 'three';
-import type { BufferGeometry, Material } from 'three';
+import type { Material } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { BikeBuild } from '../vehicle/build';
 import type { VehicleSpec, V3 } from '../vehicle/spec';
@@ -87,6 +87,66 @@ export function sideExtrude(shape: Shape, width: number, bevel: number, curveSeg
   }
   g.computeVertexNormals();
   return g;
+}
+
+/**
+ * A moulded plastic panel lofted along a centre-line in the bike's (z, y) side plane: at each
+ * point the cross-section spans `width` across the bike and curls down at the edges by `sag`
+ * (a U opening toward the wheel, like a real motocross fender), with `thick` wall thickness.
+ * Closed (top, bottom, edges and ends) so it shades correctly from every side.
+ */
+export function loftPanel(path: [number, number][], width: (t: number) => number, sag: number, thick: number, across = 10): BufferGeometry {
+  const curve = new CatmullRomCurve3(path.map(([z, y]) => new Vector3(0, y, z)));
+  const N = Math.max(12, path.length * 8);
+  const pts = curve.getSpacedPoints(N);
+  const pos: number[] = [];
+  const idx: number[] = [];
+  const ring = (across + 1) * 2; // top + bottom per station
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    const p = pts[i];
+    const tan = curve.getTangentAt(Math.min(0.999, Math.max(0.001, t)));
+    // Up-normal in the side plane (perpendicular to the tangent, pointing away from the wheel).
+    const n = new Vector3(0, tan.z, -tan.y).normalize();
+    if (n.y < 0) n.negate();
+    const w = width(t);
+    for (const layer of [0, 1]) {
+      for (let k = 0; k <= across; k++) {
+        const u = (k / across) * 2 - 1;
+        const drop = sag * u * u + (layer ? thick : 0);
+        pos.push(u * w * 0.5, p.y - n.y * drop, p.z - n.z * drop);
+      }
+    }
+  }
+  const at = (i: number, layer: number, k: number) => i * ring + layer * (across + 1) + k;
+  for (let i = 0; i < N; i++) {
+    for (let k = 0; k < across; k++) {
+      // Top (outer) and bottom (inner) skins, wound opposite ways.
+      idx.push(at(i, 0, k), at(i + 1, 0, k), at(i, 0, k + 1), at(i + 1, 0, k), at(i + 1, 0, k + 1), at(i, 0, k + 1));
+      idx.push(at(i, 1, k), at(i, 1, k + 1), at(i + 1, 1, k), at(i + 1, 1, k), at(i, 1, k + 1), at(i + 1, 1, k + 1));
+    }
+    // Side edges.
+    for (const k of [0, across]) {
+      const flip = k === 0;
+      const a = at(i, 0, k), b = at(i + 1, 0, k), c = at(i, 1, k), d = at(i + 1, 1, k);
+      if (flip) idx.push(a, c, b, b, c, d); else idx.push(a, b, c, b, d, c);
+    }
+  }
+  // End caps.
+  for (const i of [0, N]) {
+    for (let k = 0; k < across; k++) {
+      const a = at(i, 0, k), b = at(i, 0, k + 1), c = at(i, 1, k), d = at(i, 1, k + 1);
+      if (i === 0) idx.push(a, b, c, b, d, c); else idx.push(a, c, b, b, c, d);
+    }
+  }
+  const g = new BufferGeometry();
+  g.setAttribute('position', new Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  // Smooth normals on the welded mesh (soft, rounded rims), then unweld to merge with the rest.
+  g.computeVertexNormals();
+  const ni = g.toNonIndexed();
+  g.dispose();
+  return ni;
 }
 
 /** Coil spring along Y, centred, unit length. */
@@ -228,10 +288,19 @@ export class BikeModel {
 
     // --- Battery, motor, controller --------------------------------------------
     const bs = G.batterySize;
-    const battery = new Mesh(this.geo(new BoxGeometry(bs.x, bs.y, bs.z)), dark);
-    battery.position.copy(v(G.battery));
+    // Battery case: a cast, rounded box with cooling ribs along its flanks (the lower half
+    // shows below the bodywork, as on the Varg).
+    const caseM = this.mat(new MeshStandardMaterial({ color: 0x2c3036, roughness: 0.42, metalness: 0.55 }));
+    const bc = v(G.battery);
+    const battery = new Mesh(this.geo(sideExtrude(roundedShape([[bs.z / 2, bs.y / 2], [bs.z / 2, -bs.y / 2], [-bs.z / 2, -bs.y / 2], [-bs.z / 2, bs.y / 2]], 0.045), bs.x, 0.018, 8)), caseM);
+    battery.position.copy(bc);
     battery.castShadow = true;
     this.chassis.add(battery);
+    for (let k = 0; k < 5; k++) {
+      const rib = new Mesh(this.geo(new BoxGeometry(bs.x + 0.012, 0.008, bs.z * 0.78)), caseM);
+      rib.position.copy(bc).add(new Vector3(0, -bs.y * 0.42 + k * bs.y * 0.075, -bs.z * 0.02));
+      this.chassis.add(rib);
+    }
     const motor = new Mesh(this.geo(new CylinderGeometry(G.motorRadius, G.motorRadius, 0.15, 36)), alloy);
     motor.rotation.z = Math.PI / 2;
     motor.position.copy(v(G.motor));
@@ -285,14 +354,16 @@ export class BikeModel {
     const seatFront = G.seat.z + G.seatLength / 2;
     if (kit.style !== 'race') {
       // One-piece side shroud wrapping the battery, rising toward the steering head.
+      // The shroud covers the top and front of the pack and stops halfway down its flanks.
       const topF = Math.min(head.z - 0.02, z1 + 0.04);
+      const ym = y0 + (y1 - y0) * 0.42;
       const shroud = roundedShape([
         [topF, Math.max(y1 + 0.12, head.y + 0.03)],
-        [z1 + 0.035, (y0 + y1) / 2 + 0.03],
-        [z1 - 0.03, y0 - 0.035],
-        [z0 + 0.05, y0 - 0.05],
-        [z0 - 0.03, y0 + 0.05],
-        [z0 - 0.04, y1 - 0.02],
+        [z1 + 0.045, (ym + y1) / 2 + 0.02],
+        [z1 + 0.01, ym - 0.03],
+        [(z0 + z1) / 2, ym - 0.005],
+        [z0 + 0.03, ym + 0.05],
+        [z0 - 0.03, y1 - 0.02],
         [Math.max(seatFront - 0.06, z0 + 0.04), y1 + 0.03],
         [(z1 + topF) / 2 - 0.04, y1 + 0.08],
       ], 0.06);
@@ -323,11 +394,18 @@ export class BikeModel {
     addMesh(sideExtrude(seatShape, 0.21, 0.04, 14), seatM);
     // Tail / rear fender blade sweeping back from under the seat.
     const rearFenderLen = fend.style === 'short' ? 0.3 : 0.52;
-    const tailShape = roundedShape([
-      [seatEnd + 0.12, sy - 0.03], [seatEnd - rearFenderLen, sy + 0.05], [seatEnd - rearFenderLen + 0.02, sy + 0.02],
-      [seatEnd - rearFenderLen * 0.4, sy - 0.06], [seatEnd + 0.12, sy - 0.1],
-    ], 0.035);
-    addMesh(sideExtrude(tailShape, 0.2, 0.015, 10), paint);
+    // A moulded fender: U section, kicking up at the tail.
+    addMesh(loftPanel([
+      [seatEnd + 0.16, sy - 0.07], [seatEnd, sy - 0.035], [seatEnd - rearFenderLen * 0.55, sy + 0.005], [seatEnd - rearFenderLen, sy + 0.06],
+    ], (t) => 0.235 - t * 0.075, 0.045, 0.006), paint);
+    // Side number boards under the seat.
+    for (const sd of [1, -1]) {
+      const board = addMesh(sideExtrude(roundedShape([
+        [seatEnd + 0.24, sy - 0.03], [seatEnd + 0.17, sy - 0.17], [seatEnd - 0.06, sy - 0.12], [seatEnd - 0.1, sy - 0.035],
+      ], 0.03), 0.012, 0.004, 8), livery);
+      board.position.x = sd * 0.1;
+      board.rotation.y = sd * 0.06;
+    }
     // Tail light
     const tail = addMesh(new CapsuleGeometry(0.014, 0.07, 4, 8), this.brakeLightMat);
     tail.rotation.z = Math.PI / 2;
@@ -346,6 +424,7 @@ export class BikeModel {
     this.steerG.position.copy(head);
     this.chassis.add(this.steerG);
     const clampMat = alloy;
+    const guardM = this.mat(new MeshStandardMaterial({ color: V.plasticColor, roughness: fin.roughness + 0.15, side: DoubleSide }));
     const topClamp = new Mesh(this.geo(new BoxGeometry(0.22, 0.03, 0.08)), clampMat);
     topClamp.position.copy(headTop).sub(head);
     this.steerG.add(topClamp);
@@ -373,6 +452,10 @@ export class BikeModel {
       between(low, a, b);
       low.castShadow = true;
       this.forkSlide.add(low);
+      // Plastic fork guard over the front of the lower leg.
+      const guard = new Mesh(this.geo(new CylinderGeometry(lowerR + 0.012, lowerR + 0.016, 1, 14, 1, true, Math.PI * 0.35, Math.PI * 1.3)), guardM);
+      between(guard, a.clone().addScaledVector(this.steerAxis, 0.05), a.clone().addScaledVector(this.steerAxis, 0.32));
+      this.forkSlide.add(guard);
     }
     this.steerG.add(this.forkSlide);
     // Handlebar
@@ -381,6 +464,11 @@ export class BikeModel {
     bar.rotation.z = Math.PI / 2;
     bar.position.copy(barC);
     this.steerG.add(bar);
+    // Crossbar pad in the middle of the bar.
+    const pad = new Mesh(this.geo(new CapsuleGeometry(0.024, 0.13, 4, 10)), dark);
+    pad.rotation.z = Math.PI / 2;
+    pad.position.copy(barC).add(new Vector3(0, 0.022, 0));
+    this.steerG.add(pad);
     const riser = new Mesh(this.geo(new CylinderGeometry(0.012, 0.012, 1, 8)), alloy);
     between(riser, headTop.clone().sub(head), barC);
     this.steerG.add(riser);
@@ -455,9 +543,12 @@ export class BikeModel {
     // Front fender
     const fr = spec.front.radius;
     if (fend.style === 'high') {
-      const ff = new Mesh(this.geo(sideExtrude(roundedShape([[0.4, 0.0], [0.38, -0.025], [-0.12, -0.03], [-0.13, 0.0], [0.1, 0.012]], 0.03), 0.14, 0.012)), paint);
-      ff.position.set(0, -0.03, 0);
-      ff.rotation.x = -0.1;
+      // Motocross front fender: bolted under the bottom clamp, arching over the tyre, a long
+      // beak out front and a short tail, U-section throughout.
+      const ff = new Mesh(this.geo(loftPanel([
+        [-0.17, 0.015], [-0.06, -0.03], [0.08, -0.055], [0.26, -0.07], [0.43, -0.07], [0.47, -0.058],
+      ], (t) => 0.13 + Math.sin(Math.PI * Math.min(1, t * 1.4)) * 0.05 - t * 0.04, 0.04, 0.006)), paint);
+      ff.position.set(0, -0.035, 0);
       ff.castShadow = true;
       this.steerG.add(ff);
     } else {
@@ -542,17 +633,23 @@ export class BikeModel {
         list.forEach((x) => x.dispose());
         g.add(new Mesh(merged, rimStyle === 'spoke' ? alloy : rimM));
       }
-      const disc = new Mesh(this.geo(new CylinderGeometry(rotor / 2, rotor / 2, 0.005, 40)), alloy);
-      disc.rotation.z = Math.PI / 2;
+      // Brake rotor: a polished ring on a dark carrier.
+      const disc = new Mesh(this.geo(new TorusGeometry(rotor / 2 - 0.018, 0.019, 3, 48)), alloy);
+      disc.rotation.y = Math.PI / 2;
+      disc.scale.set(1, 1, 0.14);
       disc.position.x = -0.06;
       g.add(disc);
+      const carrier = new Mesh(this.geo(new CylinderGeometry(rotor * 0.3, rotor * 0.3, 0.008, 5)), dark);
+      carrier.rotation.z = Math.PI / 2;
+      carrier.position.x = -0.06;
+      g.add(carrier);
       return g;
     };
-    const fw = makeWheel(spec.front.radius, spec.front.rimRadius, spec.front.width, spec.front.tire.tread, 0.22);
+    const fw = makeWheel(spec.front.radius, spec.front.rimRadius, spec.front.width, spec.front.tire.tread, 0.26);
     this.frontWheel.add(fw);
     this.frontWheel.position.copy(axleRel);
     this.forkSlide.add(this.frontWheel);
-    const caliperF = new Mesh(this.geo(new CapsuleGeometry(0.022, 0.04, 4, 10)), accent);
+    const caliperF = new Mesh(this.geo(new CapsuleGeometry(0.026, 0.05, 4, 10)), accent);
     caliperF.position.copy(axleRel).add(new Vector3(-0.07, 0.07, -0.06));
     this.forkSlide.add(caliperF);
 
@@ -572,7 +669,8 @@ export class BikeModel {
     this.chassis.add(this.swingarm);
     this.swingarm.add(this.armScale);
     for (const s of [1, -1]) {
-      const arm = new Mesh(this.geo(sideExtrude(roundedShape([[0.04, 0.036], [0.04, -0.036], [-1.02, -0.024], [-1.02, 0.024]], 0.02), 0.034, 0.008, 6)), frameM);
+      // Cast-aluminium arm: deep at the pivot, tapering to the axle.
+      const arm = new Mesh(this.geo(sideExtrude(roundedShape([[0.05, 0.045], [0.04, -0.05], [-0.5, -0.034], [-1.02, -0.024], [-1.02, 0.024], [-0.5, 0.036]], 0.02), 0.036, 0.009, 6)), alloy);
       arm.position.set(s * 0.085, 0, 0);
       arm.castShadow = true;
       this.armScale.add(arm);

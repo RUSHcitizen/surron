@@ -592,6 +592,8 @@ export class Game {
     }
 
     // Traffic moves first, so the physics steps see the cars where they are drawn.
+    this.camera.getWorldDirection(_v);
+    this.traffic.setView(this.camera.position.x, this.camera.position.z, _v.x, _v.z);
     this.traffic.update(dt, this.bike.pos.x, this.bike.pos.z, this.bike.vel.x, this.bike.vel.z);
     // --- Fixed-step physics ---
     this.acc += dt;

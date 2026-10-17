@@ -309,7 +309,7 @@ function buildBody(): RiderMesh {
     const side = bp!.side?.(x, y, z) ?? 0;
     if (r === 'jersey' && bp!.t && tt > 0.78) r = 'jerseyAcc'; // cuffs
     else if (r === 'glove' && tt < 0.32) r = 'gloveAcc'; // glove cuff
-    else if (r === 'pants' && bp!.side && side > 0.8 && tt > 0.12 && tt < 0.88) r = 'pantsAcc'; // outer leg stripe
+    else if (r === 'pants' && bp!.side && side > 0.93 && tt > 0.15 && tt < 0.85) r = 'pantsAcc'; // outer leg stripe
     else if (r === 'boot' && bp!.t) {
       if (tt < 0.3) r = 'pants';
       else if (side > 0.035 && [0.5, 0.66, 0.82].some((b) => Math.abs(tt - b) < 0.02)) r = 'buckle';
@@ -355,6 +355,7 @@ function buildBody(): RiderMesh {
   const frames = BONES.map(() => new Matrix4());
   const lens: number[] = [];
   boneFrames(rest, frames, lens);
+  cleanRegions(regions, m.indices, REGIONS.length, 3);
   return { geometry: g, regions, restInverse: frames.map((f) => f.clone().invert()), restLen: lens };
 }
 
@@ -427,6 +428,36 @@ function buildHelmet(style: HelmetStyle) {
   const res = { geometry: g, regions };
   helmetCache.set(style, res);
   return res;
+}
+
+/**
+ * Majority vote of each vertex's region with its edge neighbours: removes the speckle where two
+ * body primitives blend and the nearest one flips from vertex to vertex, so seams between gear
+ * pieces come out as clean lines.
+ */
+function cleanRegions(regions: Uint8Array, idx: ArrayLike<number>, kinds: number, iterations: number) {
+  const n = regions.length;
+  const counts = new Uint16Array(n * kinds);
+  let cur = regions;
+  for (let it = 0; it < iterations; it++) {
+    counts.fill(0);
+    for (let v = 0; v < n; v++) counts[v * kinds + cur[v]] += 2;
+    for (let t = 0; t < idx.length; t += 3) {
+      for (let e = 0; e < 3; e++) {
+        const p = idx[t + e], q = idx[t + ((e + 1) % 3)];
+        counts[p * kinds + cur[q]]++;
+        counts[q * kinds + cur[p]]++;
+      }
+    }
+    const next = new Uint8Array(n);
+    for (let v = 0; v < n; v++) {
+      let best = cur[v], bc = counts[v * kinds + best];
+      for (let k = 0; k < kinds; k++) if (counts[v * kinds + k] > bc) { bc = counts[v * kinds + k]; best = k; }
+      next[v] = best;
+    }
+    cur = next;
+  }
+  regions.set(cur);
 }
 
 /** Average each vertex colour with its neighbours `iterations` times (along mesh edges). */
@@ -503,10 +534,10 @@ export class RiderModel {
     for (const m of this.mats) m.dispose();
     const jersey = new Color(R.jerseyColor), pants = new Color(R.pantsColor), boot = new Color(R.bootColor), glove = new Color(R.gloveColor);
     // Accent panels contrast with the main colour (dark on light gear, light on dark gear).
-    const contrast = (c: Color, other: Color) => (Math.abs(lum(c) - lum(other)) > 0.18 ? other.clone() : lum(c) > 0.45 ? new Color(0x1b1d22) : new Color(0xeef0f2));
+    const contrast = (c: Color, other: Color) => (Math.abs(lum(c) - lum(other)) > 0.18 ? other.clone() : lum(c) > 0.45 ? new Color(0x1b1d22) : new Color(0x8a9099));
     const colors: Record<Region, Color> = {
       jersey, jerseyAcc: contrast(jersey, pants), pants, pantsAcc: contrast(pants, jersey), boot,
-      buckle: new Color(0x9aa0a8), sole: new Color(0x1a1b1e), glove, gloveAcc: jersey.clone(), guard: new Color(0x2a2d33),
+      buckle: boot.clone().lerp(new Color(0x9aa0a8), 0.5), sole: new Color(0x1a1b1e), glove, gloveAcc: jersey.clone(), guard: new Color(0x2a2d33),
       brace: new Color(0x1d1f23), skin: new Color(0xc08a68),
     };
     const col = this.data.geometry.getAttribute('color') as BufferAttribute;
@@ -517,8 +548,9 @@ export class RiderModel {
       base[v * 3 + 1] = c.g;
       base[v * 3 + 2] = c.b;
     }
-    // Soften seams between gear pieces (vertex regions make a stair-stepped edge otherwise).
-    (col.array as Float32Array).set(smoothColors(base, this.data.geometry, 1));
+    // Soften seams between gear pieces (vertex regions make a stair-stepped, speckled edge
+    // otherwise, most visible where white meets black).
+    (col.array as Float32Array).set(smoothColors(base, this.data.geometry, 4));
     col.needsUpdate = true;
     const fabric = new MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 });
     const plastic = new MeshPhysicalMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.05, clearcoat: 0.4, clearcoatRoughness: 0.3 });

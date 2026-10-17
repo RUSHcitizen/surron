@@ -3,7 +3,9 @@ import { AmbientLight, Color, DirectionalLight, HemisphereLight, Matrix4, Mesh, 
 import { RiderModel } from '../../src/render/rider';
 import { BikeModel } from '../../src/render/bikeModel';
 import { computeVehicleSpec } from '../../src/vehicle/spec';
-import { defaultBuild } from '../../src/vehicle/build';
+import { PRESETS, defaultBuild } from '../../src/vehicle/build';
+import { PMREMGenerator } from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 const q = new URLSearchParams(location.search);
 const r = new WebGLRenderer({ antialias: true });
 r.setSize(innerWidth, innerHeight);
@@ -23,7 +25,10 @@ const ground = new Mesh(new PlaneGeometry(20, 20), new MeshStandardMaterial({ co
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
-const build = defaultBuild();
+const build = q.get('preset') ? PRESETS.find((p) => p.id === q.get('preset'))! : defaultBuild();
+// Studio reflections (the game uses its sky instead).
+scene.environment = new PMREMGenerator(r).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.6;
 const spec = computeVehicleSpec(build);
 const bike = new BikeModel(build, spec);
 const pose = q.get('pose') ?? 'ride';

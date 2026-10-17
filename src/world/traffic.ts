@@ -32,6 +32,10 @@ const BRAKE = 7;
 const BIKE_LOOK = 7;
 /** Signal timing (s): green, amber and all-red per axis. */
 const GREEN = 11, AMBER = 3, ALL_RED = 1.5;
+/** Cars farther than this from the bike are not drawn. */
+const DRAW_R = 320;
+/** Within this distance cars are drawn in full detail. */
+const NEAR_R = 70;
 const CYCLE = 2 * (GREEN + AMBER + ALL_RED);
 /** The city: roads outside it have a higher limit. */
 const inCity = (x: number, z: number) => x < -35 && x > -390 && Math.abs(z) < 176;
@@ -148,6 +152,18 @@ function wheelGeometry(): BufferGeometry {
   return mergeGeometries(parts, false)!;
 }
 
+/** Distant-car body: a few boxes (body, glasshouse, roof, wheels) for far away. */
+function lowBodyGeometry(): BufferGeometry {
+  const W = CAR.width, L = CAR.length;
+  const parts = [
+    tint(new BoxGeometry(W - 0.04, 0.56, L - 0.06).translate(0, 0.66, 0), new Color(1, 1, 1)),
+    tint(new BoxGeometry(W - 0.28, 0.4, 2.3).translate(0, 1.13, -0.25), new Color(0.07, 0.07, 0.07)),
+    tint(new BoxGeometry(W - 0.32, 0.07, 2.1).translate(0, 1.36, -0.25), new Color(1, 1, 1)),
+  ];
+  for (const sx of [-1, 1]) for (const zc of [1.38, -1.38]) parts.push(tint(new BoxGeometry(0.24, 0.7, 0.7).translate(sx * (W / 2 - 0.12), 0.35, zc), new Color(0.08, 0.08, 0.08)));
+  return mergeGeometries(parts, false)!;
+}
+
 function lightGeometry(): BufferGeometry {
   const parts: BufferGeometry[] = [];
   const Lh = CAR.length / 2;
@@ -169,6 +185,10 @@ export class Traffic {
   private body: InstancedMesh;
   private wheels: InstancedMesh;
   private lights: InstancedMesh;
+  /** Far level of detail (simple body with wheels baked in). */
+  private far: InstancedMesh;
+  private dirX = 0;
+  private dirZ = 1;
   private lamps: InstancedMesh[] = [];
   private active: number;
   private pt = { x: 0, z: 0, tx: 0, tz: 1 };
@@ -176,6 +196,11 @@ export class Traffic {
   /** Junction node → cars crossing it. Only compatible movements share a junction. */
   private junction = new Map<number, Set<number>>();
   private offsets: number[];
+  private paint: Color[] = [];
+  /** Where to draw from: cars beyond DRAW_R of this point are skipped (fog hides them). */
+  private viewX = 0;
+  private viewZ = 0;
+  private drawAll = true;
 
   constructor(private world: CollisionWorld, count: number, readonly roads: RoadNode[] = roadNetwork(), readonly signals: Signal[] = signalHeads(roads), seed = 11) {
     this.r = mulberry32(seed);
@@ -185,7 +210,8 @@ export class Traffic {
     this.body = new InstancedMesh(bodyGeometry(), bodyMat, Math.max(1, count));
     this.wheels = new InstancedMesh(wheelGeometry(), new MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.2 }), Math.max(1, count));
     this.lights = new InstancedMesh(lightGeometry(), new MeshBasicMaterial({ vertexColors: true, toneMapped: false }), Math.max(1, count));
-    for (const m of [this.body, this.wheels, this.lights]) {
+    this.far = new InstancedMesh(lowBodyGeometry(), bodyMat, Math.max(1, count));
+    for (const m of [this.body, this.wheels, this.lights, this.far]) {
       m.frustumCulled = false;
       this.root.add(m);
     }
@@ -194,7 +220,7 @@ export class Traffic {
     for (let i = 0; i < count; i++) {
       const car = this.spawn(i, r);
       this.cars.push(car);
-      this.body.setColorAt(i, new Color(PAINT[Math.floor(r() * PAINT.length)]));
+      this.paint.push(new Color(PAINT[Math.floor(r() * PAINT.length)]));
     }
     this.active = count;
     this.buildSignals();
@@ -291,7 +317,6 @@ export class Traffic {
       if (c.claimed) this.release(c, i);
       this.world.setPose(c.body, 0, -500, 0, 0, 0, 0);
     }
-    this.body.count = this.wheels.count = this.lights.count = this.active;
   }
 
   private isLeft(c: Car) {
@@ -344,6 +369,16 @@ export class Traffic {
       if (justOut) return false;
     }
     return true;
+  }
+
+  /** Where the camera is and which way it looks (horizontal), for drawing only what is seen. */
+  setView(x: number, z: number, dirX: number, dirZ: number) {
+    this.viewX = x;
+    this.viewZ = z;
+    const l = Math.hypot(dirX, dirZ) || 1;
+    this.dirX = dirX / l;
+    this.dirZ = dirZ / l;
+    this.drawAll = false;
   }
 
   /** bike: position and velocity (m, m/s). */
@@ -511,21 +546,38 @@ export class Traffic {
 
   private render() {
     const n = this.active;
-    for (let i = 0; i < n; i++) {
-      const c = this.cars[i];
+    // Only cars in view are drawn (near ones in full detail, far ones as a simple body),
+    // packed into the first instance slots.
+    let near = 0, far = 0, lit = 0;
+    for (let ci = 0; ci < n; ci++) {
+      const c = this.cars[ci];
+      const dx = c.x - this.viewX, dz = c.z - this.viewZ;
+      const d2 = dx * dx + dz * dz;
+      if (!this.drawAll && (d2 > DRAW_R * DRAW_R || (dx * this.dirX + dz * this.dirZ < -8 && d2 > 64))) continue;
       const y = this.world.heightAt(c.x, c.z);
       _q.setFromAxisAngle(_up, c.yaw);
       _q2.setFromAxisAngle(_x, c.pitch);
       _q.multiply(_q2);
       _m.compose(_p.set(c.x, y, c.z), _q, _s);
-      this.body.setMatrixAt(i, _m);
-      this.lights.setMatrixAt(i, _m);
-      _q.setFromAxisAngle(_up, c.yaw);
-      _m.compose(_p, _q, _s);
-      this.wheels.setMatrixAt(i, _m);
+      this.lights.setMatrixAt(lit++, _m);
+      if (this.drawAll || d2 < NEAR_R * NEAR_R) {
+        const i = near++;
+        this.body.setColorAt(i, this.paint[ci]);
+        this.body.setMatrixAt(i, _m);
+        _q.setFromAxisAngle(_up, c.yaw);
+        _m.compose(_p, _q, _s);
+        this.wheels.setMatrixAt(i, _m);
+      } else {
+        const i = far++;
+        this.far.setColorAt(i, this.paint[ci]);
+        this.far.setMatrixAt(i, _m);
+      }
     }
-    for (const m of [this.body, this.wheels, this.lights]) m.instanceMatrix.needsUpdate = true;
-    if (this.body.instanceColor) this.body.instanceColor.needsUpdate = true;
+    this.body.count = this.wheels.count = near;
+    this.far.count = far;
+    this.lights.count = lit;
+    for (const m of [this.body, this.wheels, this.lights, this.far]) m.instanceMatrix.needsUpdate = true;
+    for (const m of [this.body, this.far]) if (m.instanceColor) m.instanceColor.needsUpdate = true;
     // Lamps: bright when lit (above 1 so they bloom), dim glass otherwise.
     this.signals.forEach((sg, i) => {
       const st = this.light(sg.node, sg.dx !== 0 ? 0 : 1);

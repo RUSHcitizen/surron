@@ -69,7 +69,11 @@ The service worker is only registered in production builds (`npm run build && np
   rubber so it grips on the city streets too. The other factory builds (Scout, MX, SM, Drift, Stunt) are original designs.
 
 * **Graphics**:
-  * Smooth, sculpted bike bodywork with clear-coat paint and reflections from a sky environment map.
+  * Smooth, sculpted bike bodywork with clear-coat paint and reflections from a sky environment map: moulded U-section
+    motocross fenders, side number boards, a finned battery case below a slim shroud, fork guards, a tapered alloy
+    swingarm and ring brake rotors.
+  * City buildings with real relief: normal-mapped façades (windows set back, frames, sills and brickwork proud), office
+    fins, corner pilasters, stone sill courses and apartment balconies with railings.
   * A realistic rider: one continuous, smoothly skinned body of a man in motocross gear (jersey with cuffs, pants with leg
     stripes, knee guards, tall buckled boots, gloves, neck brace) and a sculpted helmet (MX, full-face or trail) with chin bar,
     peak, goggles and strap. It is modelled as a signed distance field, meshed at load and posed by IK on the bike every frame.

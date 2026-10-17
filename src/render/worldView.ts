@@ -408,7 +408,7 @@ export class WorldView {
     }
     const facadeMat = (st: FacadeStyle) => {
       const f = facadeSet(st);
-      const m = this.mat(new MeshStandardMaterial({ vertexColors: true, map: f.map, roughnessMap: f.orm, metalnessMap: f.orm, roughness: 1, metalness: 1, emissiveMap: f.emissive, emissive: 0x000000 }));
+      const m = this.mat(new MeshStandardMaterial({ vertexColors: true, map: f.map, normalMap: f.normal, roughnessMap: f.orm, metalnessMap: f.orm, roughness: 1, metalness: 1, emissiveMap: f.emissive, emissive: 0x000000 }));
       this.windowMats.push(m);
       return m;
     };

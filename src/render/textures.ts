@@ -304,11 +304,18 @@ export type FacadeStyle = 'brick' | 'office' | 'apartment' | 'stucco' | 'shop';
  * matte. One texture tile = one window bay × one floor. The top-left corner is always plain
  * wall: roofs sample it.
  */
-export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: CanvasTexture; orm: CanvasTexture } {
+export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: CanvasTexture; orm: CanvasTexture; normal: CanvasTexture } {
   return cached(`facade-${style}`, () => {
     const S = 256;
-    const col = canvas(S, S), em = canvas(S, S), orm = canvas(S, S);
+    const col = canvas(S, S), em = canvas(S, S), orm = canvas(S, S), hgt = canvas(S, S);
     const g = col.g, e = em.g, o = orm.g;
+    // Relief (0..255): drawn alongside the colour, turned into a normal map at the end, so
+    // panes sit back in their openings and frames, sills and bricks stand proud.
+    const H = (x: number, y: number, w: number, h: number, v: number) => {
+      hgt.g.fillStyle = `rgb(${v},${v},${v})`;
+      hgt.g.fillRect(x, y, w, h);
+    };
+    H(0, 0, S, S, style === 'brick' ? 112 : 128);
     const r = mulberry32(style.length * 97 + 13);
     e.fillStyle = '#000';
     e.fillRect(0, 0, S, S);
@@ -331,6 +338,7 @@ export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: C
       g.fill();
       o.fillStyle = 'rgb(0,30,170)';
       o.fillRect(x, y, w, h);
+      H(x, y, w, h, 60);
     };
     const frame = (x: number, y: number, w: number, h: number, c: string, t: number) => {
       g.fillStyle = c;
@@ -338,6 +346,7 @@ export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: C
       g.fillRect(x - t, y + h, w + 2 * t, t);
       g.fillRect(x - t, y, t, h);
       g.fillRect(x + w, y, t, h);
+      for (const [a, b, c2, d] of [[x - t, y - t, w + 2 * t, t], [x - t, y + h, w + 2 * t, t], [x - t, y, t, h], [x + w, y, t, h]]) H(a, b, c2, d, 185);
     };
     if (style === 'brick') {
       g.fillStyle = '#9a5b45';
@@ -348,6 +357,7 @@ export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: C
           const v = 0.85 + r() * 0.3;
           g.fillStyle = `rgb(${Math.round(150 * v)},${Math.round(84 * v)},${Math.round(62 * v)})`;
           g.fillRect(x + off + 1, y + 1, 22, 6);
+          H(x + off + 1, y + 1, 22, 6, 128 + Math.round(r() * 14));
         }
       }
       glass(78, 56, 100, 130);
@@ -355,19 +365,23 @@ export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: C
       g.fillStyle = '#ece6da';
       g.fillRect(126, 56, 4, 130);
       g.fillRect(78, 118, 100, 4);
+      H(126, 56, 4, 130, 150); H(78, 118, 100, 4, 150);
       g.fillStyle = '#c9c1b2';
       g.fillRect(66, 196, 124, 10); // sill
       g.fillRect(70, 34, 116, 12); // lintel
+      H(66, 196, 124, 10, 220); H(70, 34, 116, 12, 205);
     } else if (style === 'office') {
       g.fillStyle = '#c9ced4';
       g.fillRect(0, 0, S, S);
       glass(6, 6, S - 12, S - 66);
       g.fillStyle = '#2b3138';
       g.fillRect(6, S - 56, S - 12, 50); // spandrel
+      H(6, S - 56, S - 12, 50, 110);
       o.fillStyle = 'rgb(0,60,120)';
       o.fillRect(6, S - 56, S - 12, 50);
       g.fillStyle = '#c9ced4';
       g.fillRect(126, 0, 4, S);
+      H(126, 0, 4, S, 190); H(0, 0, 6, S, 190); H(S - 6, 0, 6, S, 190); // mullions
     } else if (style === 'apartment') {
       g.fillStyle = '#f2f0ea';
       g.fillRect(0, 0, S, S);
@@ -381,6 +395,8 @@ export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: C
       g.fillStyle = '#4a4f57';
       g.fillRect(20, 172, 216, 4);
       for (let x = 24; x < 236; x += 12) g.fillRect(x, 172, 3, 42);
+      H(20, 214, 216, 14, 235); H(20, 172, 216, 4, 215);
+      for (let x = 24; x < 236; x += 12) H(x, 172, 3, 42, 205);
     } else if (style === 'stucco') {
       g.fillStyle = '#f4efe6';
       g.fillRect(0, 0, S, S);
@@ -393,10 +409,12 @@ export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: C
       g.fillStyle = '#2f5d4a'; // shutters
       g.fillRect(58, 36, 32, 168);
       g.fillRect(166, 36, 32, 168);
+      H(58, 36, 32, 168, 170); H(166, 36, 32, 168, 170);
       g.fillStyle = 'rgba(0,0,0,0.25)';
-      for (let y = 44; y < 200; y += 10) { g.fillRect(60, y, 28, 2); g.fillRect(168, y, 28, 2); }
+      for (let y = 44; y < 200; y += 10) { g.fillRect(60, y, 28, 2); g.fillRect(168, y, 28, 2); H(60, y, 28, 2, 145); H(168, y, 28, 2, 145); }
       g.fillStyle = '#e1d8c8';
       g.fillRect(88, 206, 80, 10);
+      H(88, 206, 80, 10, 215);
     } else {
       // Shopfront: sign band, big display window with a lit interior, door on the right.
       g.fillStyle = '#3a3d44';
@@ -413,6 +431,7 @@ export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: C
       frame(198, 80, 48, 160, '#1b1d21', 4);
       g.fillStyle = '#9a9ea6';
       g.fillRect(0, 240, S, 16); // kick plate
+      H(0, 0, S, 46, 165); H(0, 240, S, 16, 150);
     }
     // Plain wall corner for roofs (top-left 10 px).
     if (style !== 'office') {
@@ -437,9 +456,32 @@ export function facadeSet(style: FacadeStyle): { map: CanvasTexture; emissive: C
     const te = tex(em.c, true);
     te.repeat.set(0.25, 0.25);
     const to = tex(orm.c, true, false);
-    t.anisotropy = te.anisotropy = to.anisotropy = 8;
-    return { map: t, emissive: te, orm: to } as unknown as Texture;
-  }) as unknown as { map: CanvasTexture; emissive: CanvasTexture; orm: CanvasTexture };
+    // Plain-wall corner stays flat (roofs sample it).
+    H(0, 0, 10, 10, style === 'brick' ? 112 : 128);
+    const tn = tex(normalFromHeight(hgt, S, 2.2), true, false);
+    t.anisotropy = te.anisotropy = to.anisotropy = tn.anisotropy = 8;
+    return { map: t, emissive: te, orm: to, normal: tn } as unknown as Texture;
+  }) as unknown as { map: CanvasTexture; emissive: CanvasTexture; orm: CanvasTexture; normal: CanvasTexture };
+}
+
+/** Tangent-space normal map from a grey height canvas (tiling: samples wrap at the edges). */
+function normalFromHeight(h: { g: CanvasRenderingContext2D }, S: number, strength: number) {
+  const src = h.g.getImageData(0, 0, S, S).data;
+  const out = canvas(S, S);
+  const img = out.g.createImageData(S, S);
+  const at = (x: number, y: number) => src[(((y + S) % S) * S + ((x + S) % S)) * 4] / 255;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    // Canvas y runs down the texture; texture-space +v runs up.
+    const nx = -(at(x + 1, y) - at(x - 1, y)) * strength, ny = (at(x, y + 1) - at(x, y - 1)) * strength;
+    const l = Math.hypot(nx, ny, 1);
+    const k = (y * S + x) * 4;
+    img.data[k] = Math.round(((nx / l) * 0.5 + 0.5) * 255);
+    img.data[k + 1] = Math.round(((ny / l) * 0.5 + 0.5) * 255);
+    img.data[k + 2] = Math.round(((1 / l) * 0.5 + 0.5) * 255);
+    img.data[k + 3] = 255;
+  }
+  out.g.putImageData(img, 0, 0);
+  return out.c;
 }
 
 /** Corrugated sheet metal (warehouses, shipping containers); grey-scale, tinted by vertex colour. */

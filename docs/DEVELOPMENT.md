@@ -79,6 +79,10 @@ instead of exploding it.
 - [x] PWA: manifest, icons, generated precaching service worker, offline fallback, cache versioning.
 - [x] Cloudflare Pages config (`_headers`, `wrangler.toml`, docs).
 - [x] 59 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] Round 6 (realism): bike bodywork lofted (`loftPanel` U-section fenders), number boards, battery case with ribs,
+      fork guards, alloy swingarm, ring rotors, bar pad; rider gear seams cleaned (region majority vote + soft blend);
+      façade normal maps from a relief layer; office fins, pilasters, sill courses, balconies; cars drawn only in view
+      with a boxy far LOD beyond 70 m. Shots: `shot-city.mjs`, `shot-facade.mjs`, `shot-tris.mjs` (triangle budget).
 - [x] Round 5: traffic lights (green/amber/all-red, junction sharing for non-conflicting moves, don't-block-the-box),
       ring roads, then a 1.6 km world with a highway loop (curved corners via per-node turn length) and countryside;
       72 cars. Stark Varg MX preset from published specs (save v4 adds and selects it). Turning: touch full lock at

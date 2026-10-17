@@ -452,6 +452,58 @@ export function generateWorld(seed = 7): WorldData {
       if (Math.abs(x1 - block.x1) < 0.5) sidesX.push([x1 + 0.9, -1]);
       for (const [axx, dir] of sidesX) vbox({ kind: 'building', style: 'awning', color: ac, x: axx, y: base + 4.0, z: cz, sx: 1.4, sy: 0.12, sz: sz * 0.8, roll: 0.28 * dir });
     }
+    // Real relief on the façades (merged with the rest, so no extra draw calls): offices get
+    // vertical fins on their window bays, the rest corner pilasters, sill courses and, on
+    // apartments, balconies on alternate bays of the long sides. Bays follow the façade
+    // texture, which tiles a whole number of 3 m bays across each face.
+    const faces: [number, number, number, number][] = [
+      [cx, z0 + 0.2, sx, -1], [cx, z1 - 0.2, sx, 1], // z faces: centre x, face z, width, outward sign
+    ];
+    const facesX: [number, number, number, number][] = [[x0 + 0.2, cz, sz, -1], [x1 - 0.2, cz, sz, 1]];
+    const trimC = style === 'brick' ? 0xd9d0c0 : style === 'stucco' ? 0xe4dccd : 0xe8e6e0;
+    const top = base + hgt;
+    if (style === 'office') {
+      const finH = hgt - 0.3;
+      for (const [fx, fz, w, sgn] of faces) {
+        const n = Math.max(1, Math.round(w / 3));
+        for (let k = 0; k <= n; k++) vbox({ kind: 'building', style: 'metal', color: 0x59616b, x: fx - w / 2 + (w * k) / n, y: base + finH / 2, z: fz + sgn * 0.17, sx: 0.14, sy: finH, sz: 0.34 });
+      }
+      for (const [fx, fz, w, sgn] of facesX) {
+        const n = Math.max(1, Math.round(w / 3));
+        for (let k = 0; k <= n; k++) vbox({ kind: 'building', style: 'metal', color: 0x59616b, x: fx + sgn * 0.17, y: base + finH / 2, z: fz - w / 2 + (w * k) / n, sx: 0.34, sy: finH, sz: 0.14 });
+      }
+    } else {
+      // Corner pilasters above the shopfront.
+      const ph = top - (base + 4.2);
+      for (const px of [x0 + 0.2, x1 - 0.2]) for (const pz of [z0 + 0.2, z1 - 0.2]) {
+        vbox({ kind: 'building', style: 'trim', color: trimC, x: px, y: base + 4.2 + ph / 2, z: pz, sx: 0.8, sy: ph, sz: 0.8 });
+      }
+      for (let k = 2; k < floors + 1; k++) {
+        const fy = base + (k - 1) * FLOOR;
+        if (style === 'apartment') {
+          // Balconies: slab and railing on alternate bays of the two long sides.
+          const longZ = sx >= sz;
+          const list = longZ ? faces : facesX;
+          for (const [fx, fz, w, sgn] of list) {
+            const n = Math.max(1, Math.round(w / 3));
+            for (let b2 = (k % 2); b2 < n; b2 += 2) {
+              const along = -w / 2 + (w * (b2 + 0.5)) / n, bw = (w / n) * 0.86;
+              const bxp = longZ ? fx + along : fx + sgn * 0.6, bzp = longZ ? fz + sgn * 0.6 : fz + along;
+              vbox({ kind: 'building', style: 'trim', color: 0xd8d4cc, x: bxp, y: fy + 0.5, z: bzp, sx: longZ ? bw : 1.2, sy: 0.16, sz: longZ ? 1.2 : bw });
+              const rx = longZ ? bxp : fx + sgn * 1.15, rz = longZ ? fz + sgn * 1.15 : bzp;
+              vbox({ kind: 'building', style: 'metal', color: 0x3f454d, x: rx, y: fy + 1.05, z: rz, sx: longZ ? bw : 0.06, sy: 0.95, sz: longZ ? 0.06 : bw });
+            }
+          }
+        } else {
+          // Sill course: a stone band under each row of windows.
+          const ly = fy + 0.68;
+          vbox({ kind: 'building', style: 'trim', color: trimC, x: cx, y: ly, z: z0 + 0.2 - 0.05, sx: sx + 0.1, sy: 0.14, sz: 0.2 });
+          vbox({ kind: 'building', style: 'trim', color: trimC, x: cx, y: ly, z: z1 - 0.2 + 0.05, sx: sx + 0.1, sy: 0.14, sz: 0.2 });
+          vbox({ kind: 'building', style: 'trim', color: trimC, x: x0 + 0.2 - 0.05, y: ly, z: cz, sx: 0.2, sy: 0.14, sz: sz + 0.1 });
+          vbox({ kind: 'building', style: 'trim', color: trimC, x: x1 - 0.2 + 0.05, y: ly, z: cz, sx: 0.2, sy: 0.14, sz: sz + 0.1 });
+        }
+      }
+    }
     // Rooftop: AC units and the odd water tank.
     const units = 1 + Math.floor(rnd() * 3);
     for (let u = 0; u < units; u++) {
