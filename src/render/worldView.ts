@@ -220,19 +220,29 @@ function shadeVertical(g: BufferGeometry, base: Color, top: Color, y0: number, y
   return g;
 }
 
-/** Three overlapping soft tiers (origin at the trunk top). */
+/**
+ * A spruce: six overlapping tiers whose skirts sag and whose outline breaks into branch tips
+ * (a star of drooping boughs per tier, each tier turned), so the silhouette reads as a tree
+ * rather than stacked cones. Origin at the trunk top.
+ */
 function pineGeometry() {
   const parts: BufferGeometry[] = [];
-  const tiers = [[1.9, 2.6, 0.9], [1.5, 2.3, 2.1], [1.0, 2.0, 3.2]];
-  for (const [r, h, y] of tiers) {
-    const c = new ConeGeometry(r, h, 11, 1);
+  const tiers = 6;
+  for (let k = 0; k < tiers; k++) {
+    const f = k / (tiers - 1);
+    const r = 2.05 - f * 1.45, h = 1.75 - f * 0.55, y = 0.55 + f * 3.15;
+    const c = new ConeGeometry(r, h, 14, 2);
     const p = c.getAttribute('position');
+    const turn = k * 0.9;
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i), z = p.getZ(i), yy = p.getY(i);
-      // Droop the skirt and wobble the outline a little.
-      const a = Math.atan2(z, x);
-      const w = 1 + Math.sin(a * 7 + y) * 0.06;
-      p.setXYZ(i, x * w, yy - (yy < -h / 2 + 0.01 ? 0.15 : 0), z * w);
+      const a = Math.atan2(z, x) + turn;
+      const rim = (h / 2 - yy) / h; // 0 at the tip, 1 at the skirt
+      // Branch tips: a spiky outline at the skirt, soft toward the tip.
+      const tips = 1 + (Math.pow(Math.abs(Math.sin(a * 3.5)), 3) * 0.32 - 0.1) * rim + Math.sin(a * 11 + k) * 0.04 * rim;
+      // Boughs droop: the skirt hangs lower, more at the branch tips.
+      const droop = rim * rim * (0.32 + 0.25 * Math.abs(Math.sin(a * 3.5)));
+      p.setXYZ(i, x * tips, yy - droop, z * tips);
     }
     c.translate(0, y, 0);
     c.computeVertexNormals();
@@ -240,7 +250,7 @@ function pineGeometry() {
   }
   const g = mergeGeometries(parts.map((x) => { x.deleteAttribute('uv'); return x; }), false)!;
   parts.forEach((x) => x.dispose());
-  return withTrunk(shadeVertical(g, new Color(0x1b3a22), new Color(0x3f7044), -0.5, 4.4), 2.1);
+  return withTrunk(shadeVertical(g, new Color(0x16301c), new Color(0x46784a), -0.4, 4.6), 1.9);
 }
 
 /** Add a trunk (origin moves to the ground) so a whole tree is one instanced draw. */

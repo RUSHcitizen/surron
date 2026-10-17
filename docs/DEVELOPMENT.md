@@ -78,7 +78,13 @@ instead of exploding it.
 - [x] IndexedDB saves (versioned, migration, corruption-safe, fallbacks).
 - [x] PWA: manifest, icons, generated precaching service worker, offline fallback, cache versioning.
 - [x] Cloudflare Pages config (`_headers`, `wrangler.toml`, docs).
-- [x] 58 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] 59 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] Round 5: traffic lights (green/amber/all-red, junction sharing for non-conflicting moves, don't-block-the-box),
+      ring roads, then a 1.6 km world with a highway loop (curved corners via per-node turn length) and countryside;
+      72 cars. Stark Varg MX preset from published specs (save v4 adds and selects it). Turning: touch full lock at
+      ~75% deflection, stronger arcade turn aid and arcade side grip (Varg: 15 m radius at 54 km/h). Boost (meter,
+      overboost + arcade surge), camera roll with lean, rider hang-off, spruce trees. Labs: `lab-launch`, `lab-spec`,
+      `lab-gen`, `lab-map` (writes tools/shots/map.png), `shot-turn.mjs`, `shot-highway.mjs`.
 - [x] Round 4: skinned SDF rider (man in MX gear, sculpted helmets), arcade crash rule (only 30+ mph impacts or a
       looped-out wheelie; auto-righting), Hyper ride mode (up to ~230 km/h) with high-speed stability aids, wheelie/stoppie
       buttons that work at speed, spring-damped camera with a three-quarter trick view, post-processing (bloom, speed blur,
@@ -117,7 +123,7 @@ instead of exploding it.
   - The most extreme build (22 kW "Monster" on dual-sport tires) can't do rear-brake-entry drifts reliably. That's
     intentional and listed in its cons, but it's harsh.
 - Pedestrians use simple loop paths; there are no crosswalk behaviours.
-- Traffic is limited to the city grid (one car crosses a junction at a time; no traffic lights). Cars are kinematic:
+- Traffic drives axis-aligned roads only (city grid, ring roads, highway). Cars are kinematic:
   they push the bike but are never pushed or damaged themselves.
 - Touch steering is a virtual stick. There is no tilt (accelerometer) option yet.
 - Audio has only been verified to initialise without errors. I haven't listened to it on real hardware, so levels may need tuning.

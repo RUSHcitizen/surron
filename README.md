@@ -39,6 +39,7 @@ The service worker is only registered in production builds (`npm run build && np
 | **E** | Lean forward: keep the front down, stoppie, push down in the air |
 | **Z** | **Wheelie button** (hold). Pops and holds a wheelie; hold it too long (about 3 s) and you loop out and fall off the back |
 | **X** | **Stoppie button** (hold). Weight forward plus front brake; too long at speed sends you over the bars |
+| **F** | **Boost** (hold): a few seconds of electric overboost. Refills slowly, and faster from tricks and near misses |
 | **R** | Reset to the last safe spot |
 | **C** | Camera: chase / far / helmet |
 | **M** | Ride mode: Eco / Standard / Sport / **Hyper** (very fast: up to ~230 km/h depending on the bike) |
@@ -48,19 +49,24 @@ The service worker is only registered in production builds (`npm run build && np
 | **Esc** / P | Pause (teleport, challenges, settings) |
 | Mouse drag / wheel | Look around / zoom |
 
-**Gamepad:** RT throttle, LT front brake, RB/B rear brake, left stick steer, right stick lean (LB = lean back), A wheelie, L3 stoppie, Y reset, Start pause, X ride mode.
+**Gamepad:** RT throttle, LT front brake, RB/B rear brake, left stick steer, right stick lean (LB = lean back), A wheelie, L3 stoppie, R3 boost, Y reset, Start pause, X ride mode.
 
 ### Touch (phones/tablets, landscape)
 
 * **Left stick** (floating: it centres wherever your thumb lands on the left half): steer (left/right) and lean (up = forward, down = back).
 * **Throttle pad** (tall, right): slide your thumb up for more throttle.
 * **FRONT / REAR** brake buttons. Your thumb can slide between throttle and brakes without lifting.
+* **BOOST** above the throttle (rides flat out while held; the blue fill is the charge left).
 * **WHEELIE / STOPPIE** buttons above the brakes. The wheelie button fills red the longer you hold it; let go before it is full or you fall off the back.
 * Top-right: pause ❚❚, reset ⟲, camera ◉, ride mode M.
 * Drag the empty upper-right area to look around.
 * All controls are multitouch, so you can throttle, steer and brake at the same time. There's a left-handed layout in Settings.
 
 ## What's in the game
+
+* **Bikes**: the first factory bike is modelled on the real **Stark Varg MX** from its published figures: 80 hp (60 kW),
+  about 938 N·m at the rear wheel, 21/19-inch wheels, 310 mm of suspension travel and about 118 kg. It runs dual-sport
+  rubber so it grips on the city streets too. The other factory builds (Scout, MX, SM, Drift, Stunt) are original designs.
 
 * **Graphics**:
   * Smooth, sculpted bike bodywork with clear-coat paint and reflections from a sky environment map.
@@ -123,13 +129,16 @@ The service worker is only registered in production builds (`npm run build && np
   * Live 3D preview and stats with deltas against the version you started from.
   * Clearly separated **estimates**, **simulated test bench** results (the real physics run headlessly), and **measured** in-world results.
   * Dyno chart, saved builds, 2–3-way comparison, and JSON import/export.
-* **World** (800 m square): city grid with curbs, alleys, a parking lot and industrial yards; the hub with the garage; a drag strip
+* **World** (1.6 km square): city grid with curbs, alleys, a parking lot and industrial yards; the hub with the garage; a drag strip
   with braking zone; drift pad; cone course; MX track with tabletops, berms and whoops; stunt park with kicker/landing pairs;
-  sand pit; off-road hills. About 320 pedestrians walk the city sidewalks and step aside (non-graphic contact; only the people
-  near you are drawn). City traffic: 30 electric cars drive the street grid in the right-hand lane, turn at junctions, queue,
-  brake and honk for a bike in their lane, but not instantly, so you have to dodge them. A near miss scores +150, hitting
-  one at a 30+ mph closing speed is a crash (Settings → City traffic turns them off). There are 30 collectible charge
-  cores that unlock cosmetic parts, and you can switch between day, sunset and night.
+  sand pit; off-road hills; ring roads round the city; and an outer countryside of rolling hills and forest circled by a
+  1.2 km highway loop with sweeping corners. About 320 pedestrians walk the city sidewalks and step aside (non-graphic
+  contact; only the people near you are drawn).
+* **Traffic**: 72 electric cars drive the city, ring roads and highway in the right-hand lane. They obey traffic lights at
+  every junction (green / amber / all-red), turn on smooth curves, queue, U-turn at road ends, and brake and honk for a bike
+  in their lane, but not instantly, so you have to dodge them. A near miss scores +150 and charges boost; hitting one at a
+  30+ mph closing speed is a crash (Settings → City traffic turns them off).
+* There are 42 collectible charge cores that unlock cosmetic parts, and you can switch between day, sunset and night.
 * **Challenges with medals**: Drag Strip 201 m, Brake Test, Drift Pad, Stunt Park Jam, MX Track Lap, Cone Course, Long Jump.
 * **Scoring**: drifts, wheelies, stoppies, air, flips and spins, with combos, multipliers, clean-landing bonuses and busts on crashes.
 * **Effects**: tire marks, smoke on tarmac, dust and roost on loose ground, and landing dust.
@@ -196,7 +205,7 @@ npm run deploy        # = npm run build && npx wrangler deploy
 
 ## Tests
 
-* `npm test`: 58 Vitest tests.
+* `npm test`: 59 Vitest tests.
   * Physics scenarios:
     * settling and sag; acceleration and top speed; braking for every preset without flipping
     * turn equilibrium vs. tanφ = v²/(gR); right-steer → right-lean; low-speed U-turn; slaloms at 3 speeds

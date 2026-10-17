@@ -52,7 +52,8 @@ test('garage edits change stats, persist across reload and apply to the ride', a
   const before = await massRow.locator('.v').textContent();
   await page.locator('.part', { hasText: 'Hyper 84V 45Ah' }).click();
   await expect(massRow.locator('.v')).not.toHaveText(before!);
-  await expect(massRow.locator('.d')).toContainText('+');
+  // The starting bike (Stark Varg MX) carries the heaviest pack, so this swap saves weight.
+  await expect(massRow.locator('.d')).toContainText('−');
   await page.getByRole('button', { name: 'Ride this build ▶' }).click();
   await page.waitForFunction(() => (window as any).voltline.state === 'ride');
   expect(await evalGame<string>(page, 'return g.build.parts.battery')).toBe('hyper84');
