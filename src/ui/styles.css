@@ -134,6 +134,11 @@ input[type='range'] { accent-color: var(--accent); }
   background: rgba(10, 12, 16, 0.72); border: 1px solid var(--line); border-radius: 16px; padding: 12px 16px; min-width: 210px;
 
 }
+.hud-map {
+  position: absolute; left: calc(18px + var(--safe-l)); bottom: calc(18px + var(--safe-b)); width: 150px; height: 150px;
+  border-radius: 50%; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35); opacity: 0.92;
+}
+body.touching .hud-map { bottom: auto; top: calc(124px + var(--safe-t)); left: calc(12px + var(--safe-l)); width: 96px; height: 96px; }
 .hud-speed { font-size: 46px; font-weight: 850; line-height: 1; letter-spacing: -0.02em; }
 .hud-speed small { font-size: 13px; color: var(--muted); font-weight: 600; margin-left: 4px; }
 .hud-bars { display: grid; gap: 6px; margin-top: 8px; }

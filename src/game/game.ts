@@ -2,6 +2,7 @@
  * Game: owns the renderer, world, bike, systems and the main loop.
  * Physics runs at a fixed step (TUNING.dt); rendering interpolates between steps.
  */
+import type { RiderBody } from '../render/rider';
 import {
   ACESFilmicToneMapping, DirectionalLight, Fog, HemisphereLight, Matrix4, PCFShadowMap, PCFSoftShadowMap, PerspectiveCamera,
   PMREMGenerator, Quaternion, Scene, SpotLight, SRGBColorSpace, Vector3, WebGLRenderer,
@@ -48,7 +49,7 @@ const QUALITY: Record<Settings['quality'], Quality> = {
 const GRASS_MAX = 7000;
 const CITY_PEDS = 320;
 const CARS = 72;
-const _v = new Vector3(), _v2 = new Vector3(), _m = new Matrix4(), _gl = new Vector3(), _gr = new Vector3();
+const _v = new Vector3(), _v2 = new Vector3(), _m = new Matrix4(), _mi = new Matrix4(), _gl = new Vector3(), _gr = new Vector3();
 
 export class Game {
   renderer: WebGLRenderer;
@@ -524,6 +525,36 @@ export class Game {
     return this.dynPR;
   }
 
+  /** Rider body language (smoothed): stand, foot down, head turn, accel/brake sway. */
+  private riderBody: RiderBody = { stand: 0, accel: 0, foot: 0, look: 0, groundY: -0.5 };
+  private lastSpeed = 0;
+  private accelS = 0;
+  private updateRiderBody(dt: number, chassis: Matrix4) {
+    const b = this.bike, r = this.riderBody;
+    const d = Math.min(dt, 0.1);
+    const ease = (cur: number, to: number, rate: number) => cur + (to - cur) * Math.min(1, rate * d);
+    const v = Math.abs(b.speed);
+    const air = !b.front.grounded && !b.rear.grounded;
+    const rough = b.rear.surface !== 'asphalt' && b.rear.surface !== 'concrete';
+    const wheelie = b.pitch > 0.18 && b.rear.grounded && !b.front.grounded;
+    // Stand up for jumps and rough ground at pace; sit for wheelies, slow riding and corners.
+    const standT = wheelie ? 0 : air ? 1 : rough && v > 7 && Math.abs(b.lean) < 0.35 ? 0.7 : 0;
+    r.stand = ease(r.stand, standT, standT > r.stand ? 5 : 3);
+    // Foot down when (nearly) stopped and not driving off.
+    const footT = v < 1.0 && (b.front.grounded || b.rear.grounded) && b.input.throttle < 0.15 && !wheelie ? 1 : 0;
+    r.foot = ease(r.foot, footT, footT > r.foot ? 3.5 : 7);
+    // Longitudinal acceleration, normalised (~1 at 8 m/s²).
+    if (d > 0) this.accelS = ease(this.accelS, (b.speed - this.lastSpeed) / d, 6);
+    this.lastSpeed = b.speed;
+    r.accel = ease(r.accel, Math.max(-1, Math.min(1, this.accelS / 8)), 8);
+    // Look into the turn (+ yaw = the bike's left; steering right is +steer).
+    r.look = ease(r.look, Math.max(-0.6, Math.min(0.6, -b.steer * 0.9 + b.yawRate * 0.18)), 5);
+    // Road height under the bike, in the chassis frame.
+    _v.set(this.renderPos.x, this.world.heightAt(this.renderPos.x, this.renderPos.z), this.renderPos.z);
+    _v.applyMatrix4(_mi.copy(chassis).invert());
+    r.groundY = _v.y;
+  }
+
   /** Horns, near misses and bumps with city traffic. */
   private trafficEvents() {
     const b = this.bike;
@@ -550,7 +581,7 @@ export class Game {
   private menuUpdate(dt: number) {
     // Idle bike with a slow orbiting camera behind the menu.
     this.bike.step(emptyInput());
-    this.syncModel(1);
+    this.syncModel(1, dt);
     const a = this.time * 0.15;
     const p = this.renderPos;
     this.camera.position.set(p.x + Math.sin(a) * 5, p.y + 1.4, p.z + Math.cos(a) * 5);
@@ -613,7 +644,7 @@ export class Game {
     }
     if (steps >= 40) this.acc = 0;
     const alpha = this.acc / TUNING.dt;
-    this.syncModel(alpha);
+    this.syncModel(alpha, dt);
 
     // Events
     for (const e of this.bike.events) {
@@ -643,6 +674,18 @@ export class Game {
 
     // Systems
     this.scorer.update(dt, this.bike);
+    const wd = this.scorer.wheelieDone;
+    if (wd !== null) {
+      this.scorer.wheelieDone = null;
+      const pr = this.save.data.progress;
+      if (wd >= 25 && wd > pr.bestWheelie) {
+        const first = pr.bestWheelie === 0;
+        pr.bestWheelie = Math.round(wd);
+        this.ui.toast(first ? `Wheelie record set: ${pr.bestWheelie} m` : `New best wheelie: ${pr.bestWheelie} m!`, 2600);
+        this.audio.click();
+        void this.save.saveNow();
+      }
+    }
     // Tricks charge the boost (the HUD shows and clears the events afterwards).
     for (const e of this.scorer.events) if (e.type === 'trick') this.boostMeter = Math.min(1, this.boostMeter + e.points / 1200);
     if (this.challenge) this.challenge.update(dt, { bike: this.bike, data: this.data, scorer: this.scorer, view: this.view });
@@ -681,7 +724,7 @@ export class Game {
   }
 
   /** Copy interpolated physics state into the render model. */
-  private syncModel(alpha: number) {
+  private syncModel(alpha: number, dt: number) {
     const b = this.bike;
     this.renderPos.lerpVectors(b.prevPos, b.pos, alpha);
     this.renderQuat.slerpQuaternions(b.prevQuat, b.quat, alpha);
@@ -698,7 +741,8 @@ export class Game {
     } else {
       this.model.gripPositions(_gl, _gr);
       _m.copy(this.model.chassisGroup.matrixWorld);
-      this.model.rider.pose(this.spec, _m, _gl, _gr, b.riderShift, b.riderLat, b.speed, b.lean);
+      this.updateRiderBody(dt, _m);
+      this.model.rider.pose(this.spec, _m, _gl, _gr, b.riderShift, b.riderLat, b.speed, b.lean, this.riderBody);
     }
     this.model.lightAnchor.getWorldPosition(this.headlight.position);
     this.headlight.target = this.model.lightTarget;

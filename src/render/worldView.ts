@@ -11,9 +11,9 @@ import type { Material } from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { WorldBox, WorldData } from '../world/layout';
 import { SURFACE_INDEX } from '../world/collision';
-import { corrugatedTexture, facadeSet, groundDetail, showroomTexture, signTexture } from './textures';
+import { corrugatedTexture, facadeSet, groundDetail, leafTexture, showroomTexture, signTexture } from './textures';
 import type { FacadeStyle } from './textures';
-import { fbm } from '../core/noise';
+import { fbm, mulberry32 } from '../core/noise';
 
 const SURF_COLOR: Record<string, [number, number, number]> = {
   asphalt: [0.25, 0.25, 0.255],
@@ -154,7 +154,7 @@ function foliage<T extends MeshStandardMaterial>(m: T): T {
   return m;
 }
 
-function boxGeometry(b: WorldBox, uvScale: number, facade?: { su: number; sv: number }) {
+function boxGeometry(b: WorldBox, uvScale: number, facade?: { su: number; sv: number; ground: number }) {
   const g = new BoxGeometry(b.sx, b.sy, b.sz);
   if (facade) {
     // Walls tile one window bay × one floor; roofs/floors sample the plain corner of the texture.
@@ -192,7 +192,40 @@ function boxGeometry(b: WorldBox, uvScale: number, facade?: { su: number; sv: nu
     cols[i * 3 + 2] = c.b * shade;
   }
   g.setAttribute('color', new Float32BufferAttribute(cols, 3));
+  // Façades: ground height under the box, for contact shading and grime near street level.
+  if (facade) g.setAttribute('aGround', new Float32BufferAttribute(new Float32Array(n).fill(facade.ground), 1));
   return g;
+}
+
+/**
+ * Weathering for façades: contact shading where walls meet the street, grime that thickens
+ * toward the ground, faint rain streaks and a per-building tone shift, so walls stop looking
+ * freshly printed. All procedural, applied before lighting.
+ */
+function weathered<T extends MeshStandardMaterial>(m: T): T {
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aGround; varying vec3 vWallPos; varying float vAbove;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWallPos = (modelMatrix * vec4(position, 1.0)).xyz; vAbove = vWallPos.y - aGround;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWallPos; varying float vAbove;' + NOISE_GLSL)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        {
+          float h = max(vAbove, 0.0);
+          // Contact shading: walls darken into the pavement (strongest in the first metre).
+          float ao = mix(0.52, 1.0, smoothstep(0.0, 2.6, h)) * mix(0.85, 1.0, smoothstep(0.0, 0.35, h));
+          // Splash-back grime and soot near street level.
+          float grime = (1.0 - smoothstep(0.3, 4.5, h)) * (0.6 + 0.4 * vnoise(vWallPos.xz * 0.9 + vWallPos.y * 0.7));
+          // Rain streaks: long vertical streaks hanging from ledges.
+          float along = vWallPos.x + vWallPos.z;
+          float streak = smoothstep(0.55, 0.9, vnoise(vec2(along * 1.7, vWallPos.y * 0.06))) * smoothstep(0.3, 0.8, vnoise(vec2(along * 0.25, vWallPos.y * 0.2 + 4.0)));
+          // Per-building tone shift (big, slow noise) so neighbours do not match exactly.
+          float tone = 0.93 + 0.14 * vnoise(vWallPos.xz * 0.013 + 2.0);
+          diffuseColor.rgb *= ao * tone * (1.0 - grime * 0.22) * (1.0 - streak * 0.12);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.92, 0.88, 0.8), grime * 0.5);
+        }`);
+  };
+  return m;
 }
 
 /** Displace a sphere-like geometry with smooth noise (organic, not faceted). */
@@ -273,21 +306,73 @@ function withTrunk(canopy: BufferGeometry, lift: number) {
   return g;
 }
 
-/** Clustered canopy of noisy blobs (origin at the trunk top). */
+/** Leaf clumps of the broadleaf crown: x, y, z, radius (y from the trunk top). */
+const BROAD_BLOBS: [number, number, number, number][] = [
+  [0, 1.7, 0, 1.25], [1.35, 1.25, 0.35, 0.95], [-1.25, 1.35, -0.25, 1.0], [0.3, 1.2, 1.3, 0.9], [-0.35, 1.3, -1.3, 0.95],
+  [0.85, 2.45, -0.5, 0.85], [-0.75, 2.5, 0.6, 0.85], [0.1, 3.1, 0.1, 0.75], [1.5, 2.0, 1.0, 0.65], [-1.55, 2.1, -1.0, 0.6],
+];
+const BROAD_LIFT = 3.3;
+
+/**
+ * Broadleaf core: the clumps as shrunken, darker noisy blobs. They give the crown volume and
+ * a solid silhouette at a distance; the leaf cards (broadleafCards) make up the visible
+ * surface up close. Origin at the ground, trunk included.
+ */
 function broadleafGeometry() {
-  // An open crown of separate leaf clumps (sky shows between them) rather than one blob.
-  const blobs: [number, number, number, number][] = [
-    [0, 1.7, 0, 1.25], [1.35, 1.25, 0.35, 0.95], [-1.25, 1.35, -0.25, 1.0], [0.3, 1.2, 1.3, 0.9], [-0.35, 1.3, -1.3, 0.95],
-    [0.85, 2.45, -0.5, 0.85], [-0.75, 2.5, 0.6, 0.85], [0.1, 3.1, 0.1, 0.75], [1.5, 2.0, 1.0, 0.65], [-1.55, 2.1, -1.0, 0.6],
-  ];
-  const parts = blobs.map(([x, y, z, r], i) => {
-    const g = lumpGeometry(r, 1, 0.3, i * 3.7);
+  const parts = BROAD_BLOBS.map(([x, y, z, r], i) => {
+    const g = lumpGeometry(r * 0.6, 1, 0.3, i * 3.7);
     g.translate(x, y, z);
     return g;
   });
   const g = mergeGeometries(parts, false)!;
   parts.forEach((x) => x.dispose());
-  return withTrunk(shadeVertical(g, new Color(0x2c4a1c), new Color(0x7aa142), -0.2, 3.6), 3.3);
+  return withTrunk(shadeVertical(g, new Color(0x1f3814), new Color(0x557a2c), -0.2, 3.6), BROAD_LIFT);
+}
+
+/**
+ * Broadleaf leaf cards: alpha-tested quads of leaves scattered over each clump, facing
+ * roughly outward. Normals point away from the crown centre (with an upward bias) so the
+ * crown shades as one soft volume instead of a pile of flat cards.
+ */
+function broadleafCards() {
+  const rnd = mulberry32(4242);
+  const pos: number[] = [], nor: number[] = [], uv: number[] = [], col: number[] = [];
+  const centre = new Vector3(0, 1.9, 0);
+  const q = new Quaternion(), e = new Euler(), v = new Vector3(), n = new Vector3(), d = new Vector3();
+  const dark = new Color(0x3d6324), light = new Color(0xa6c96a), c = new Color();
+  const corners = [[-0.5, -0.5, 0, 0], [0.5, -0.5, 1, 0], [0.5, 0.5, 1, 1], [-0.5, 0.5, 0, 1]];
+  for (const [bx, by, bz, r] of BROAD_BLOBS) {
+    const count = Math.round(r * 13);
+    for (let i = 0; i < count; i++) {
+      // A point on the clump surface (upper half favoured: crowns are fuller on top).
+      d.set(rnd() * 2 - 1, rnd() * 1.6 - 0.6, rnd() * 2 - 1).normalize();
+      const p = new Vector3(bx, by, bz).addScaledVector(d, r * (0.55 + rnd() * 0.4));
+      const size = r * (1.3 + rnd() * 0.6);
+      e.set((rnd() - 0.5) * Math.PI, Math.atan2(d.x, d.z) + (rnd() - 0.5) * 1.2, (rnd() - 0.5) * Math.PI);
+      q.setFromEuler(e);
+      n.copy(p).sub(centre).normalize().add(new Vector3(0, 0.6, 0)).normalize();
+      const t = Math.min(1, Math.max(0, (p.y + 0.2) / 3.6));
+      c.copy(dark).lerp(light, t * 0.8 + rnd() * 0.25);
+      const quad = corners.map(([x, y, u, w]) => {
+        v.set(x * size, y * size, 0).applyQuaternion(q).add(p);
+        return [v.x, v.y + BROAD_LIFT, v.z, u, w];
+      });
+      for (const k of [0, 1, 2, 0, 2, 3]) {
+        const [x, y, z, u, w] = quad[k];
+        pos.push(x, y, z);
+        nor.push(n.x, n.y, n.z);
+        uv.push(u, w);
+        col.push(c.r, c.g, c.b);
+      }
+    }
+  }
+  const g = new BufferGeometry();
+  g.setAttribute('position', new Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new Float32BufferAttribute(uv, 2));
+  g.setAttribute('color', new Float32BufferAttribute(col, 3));
+  g.computeBoundingSphere();
+  return g;
 }
 
 export interface Quality {
@@ -410,9 +495,10 @@ export class WorldView {
     const FACADES = ['brick', 'office', 'apartment', 'stucco'];
     for (const b of [...this.data.boxes, ...this.data.decor.vboxes]) {
       if (b.kind === 'invisible') continue;
-      if (b.style === 'shop') push('f-shop', boxGeometry(b, 0, { su: 1 / 6, sv: 1 / 4.2 }));
+      const ground = this.data.terrain.heightAt(b.x, b.z);
+      if (b.style === 'shop') push('f-shop', boxGeometry(b, 0, { su: 1 / 6, sv: 1 / 4.2, ground }));
       else if (b.style === 'trim' || b.style === 'awning' || b.style === 'metal') push(b.style, boxGeometry(b, 0));
-      else if (b.kind === 'building') push('f-' + (FACADES.includes(b.style ?? '') ? b.style : 'apartment'), boxGeometry(b, 0, { su: 1 / 3, sv: 1 / 3.5 }));
+      else if (b.kind === 'building') push('f-' + (FACADES.includes(b.style ?? '') ? b.style : 'apartment'), boxGeometry(b, 0, { su: 1 / 3, sv: 1 / 3.5, ground }));
       else if (b.kind === 'sidewalk') push('concrete', boxGeometry(b, 1 / 6));
       else if (b.kind === 'warehouse' || b.kind === 'container') push('corr', boxGeometry(b, 1 / 2));
       else if (b.kind === 'ramp' || b.kind === 'support' || b.kind === 'pallet') push('wood', boxGeometry(b, 1 / 4));
@@ -420,7 +506,7 @@ export class WorldView {
     }
     const facadeMat = (st: FacadeStyle) => {
       const f = facadeSet(st);
-      const m = this.mat(new MeshStandardMaterial({ vertexColors: true, map: f.map, normalMap: f.normal, roughnessMap: f.orm, metalnessMap: f.orm, roughness: 1, metalness: 1, emissiveMap: f.emissive, emissive: 0x000000 }));
+      const m = this.mat(weathered(new MeshStandardMaterial({ vertexColors: true, map: f.map, normalMap: f.normal, roughnessMap: f.orm, metalnessMap: f.orm, roughness: 1, metalness: 1, emissiveMap: f.emissive, emissive: 0x000000 })));
       this.windowMats.push(m);
       return m;
     };
@@ -531,6 +617,11 @@ export class WorldView {
     };
     mkInst(pineGeometry(), pineM, pines, 0, 1, true, true);
     mkInst(broadleafGeometry(), leafM, broad, 0, 1, true, true);
+    // Leaf cards over the broadleaf cores (same placement, so the instances line up).
+    const cardM = this.mat(new MeshStandardMaterial({
+      vertexColors: true, map: leafTexture(), alphaTest: 0.5, alphaToCoverage: true, side: DoubleSide, roughness: 0.78,
+    }));
+    mkInst(broadleafCards(), cardM, broad, 0, 1, true, true);
     // Rocks
     const rockM = this.mat(new MeshStandardMaterial({ color: 0x8a847b, roughness: 0.92 }));
     mkInst(lumpGeometry(0.8, 1, 0.28, 3), rockM, this.data.rocks, 0.2, 0.65);

@@ -392,6 +392,20 @@ describe('forgiving for casual phone riding', () => {
 });
 
 describe('arcade crash rule (default)', () => {
+  it('arcade turning is coordinated: the Varg never turns tighter than its lean balances', () => {
+    const varg = PRESETS.find((p) => p.id === 'varg')!;
+    for (const v of [15, 25]) {
+      const bike = makeBike(computeVehicleSpec(varg), flatWorld(6000, 'asphalt'));
+      settle(bike);
+      run(bike, 30, (_t, b) => ({ ...emptyInput(), throttle: cruise(v)(b) }), (_t, b) => b.speed >= v);
+      run(bike, 4, (_t, b) => ({ ...emptyInput(), throttle: cruise(v)(b), steer: 1 }));
+      const coord = Math.tan(Math.abs(bike.lean)) / ((bike.speed * Math.abs(bike.yawRate)) / 9.81);
+      expect(coord, `v${v}`).toBeGreaterThan(0.75);
+      expect(coord, `v${v}`).toBeLessThan(1.3);
+      expect(bike.crashed).toBe(false);
+    }
+  });
+
   it('full-lock turning at any speed never crashes or lies the bike down', () => {
     for (const p of PRESETS) {
       const bike = makeBike(computeVehicleSpec(p), flatWorld(20000, 'asphalt'), 'hyper');

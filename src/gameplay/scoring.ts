@@ -21,6 +21,10 @@ export class Scorer {
   /** Current live trick (for HUD). */
   live: { name: string; points: number } | null = null;
   bestDrift = 0;
+  /** Distance of the wheelie in progress, m. */
+  wheelieDist = 0;
+  /** Set when a wheelie ends: its distance (m), for the best-wheelie record; read and cleared by the game. */
+  wheelieDone: number | null = null;
   longestJump = 0;
   lastJump = 0;
   private active: Trick | null = null;
@@ -48,6 +52,10 @@ export class Scorer {
 
   private finishTrick() {
     if (!this.active) return;
+    if (this.active === 'wheelie') {
+      this.wheelieDone = this.wheelieDist;
+      this.wheelieDist = 0;
+    }
     if (this.trickPts >= 25 && this.trickTime > 0.35) {
       const name = this.active === 'drift' ? 'Drift' : this.active === 'wheelie' ? 'Wheelie' : this.active === 'stoppie' ? 'Stoppie' : 'Air';
       this.addToChain(name, this.trickPts);
@@ -82,6 +90,7 @@ export class Scorer {
       this.multiplier = 1;
       this.active = null;
       this.trickPts = 0;
+      this.wheelieDist = 0;
       this.live = null;
       this.tricksInChain.clear();
       this.pendingAir = null;
@@ -152,7 +161,8 @@ export class Scorer {
       this.trickTime += dt;
       this.trickPts += rate * dt;
       if (trick === 'drift') this.driftTotal += rate * dt;
-      const label = trick === 'air' ? `Air ${b.airTime.toFixed(1)}s` : trick[0].toUpperCase() + trick.slice(1);
+      if (trick === 'wheelie') this.wheelieDist += v * dt;
+      const label = trick === 'air' ? `Air ${b.airTime.toFixed(1)}s` : trick === 'wheelie' ? `Wheelie ${Math.round(this.wheelieDist)} m` : trick[0].toUpperCase() + trick.slice(1);
       this.live = { name: label, points: Math.round(this.trickPts) };
       this.idle = 0;
     } else {

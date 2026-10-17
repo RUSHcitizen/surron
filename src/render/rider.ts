@@ -488,6 +488,21 @@ function smoothColors(src: Float32Array, g: BufferGeometry, iterations: number):
 const lum = (c: Color) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
 
 /** Rider in MX gear, posed by IK. Lives in the scene separately so it can detach on crashes. */
+/** Body language on top of the riding pose (all smoothed by the caller). */
+export interface RiderBody {
+  /** 0..1: standing on the pegs (air, rough ground). */
+  stand: number;
+  /** -1..1: longitudinal acceleration (+ = speeding up), rocks the torso. */
+  accel: number;
+  /** 0..1: left foot down to the road (stopped). */
+  foot: number;
+  /** Head yaw toward the turn, rad (+ = to the bike's left). */
+  look: number;
+  /** Road height in the chassis frame, for the planted foot. */
+  groundY: number;
+}
+const NO_BODY: RiderBody = { stand: 0, accel: 0, foot: 0, look: 0, groundY: -0.5 };
+
 export class RiderModel {
   root = new Group();
   private body: SkinnedMesh;
@@ -601,22 +616,31 @@ export class RiderModel {
    * Pose in the bike's chassis frame, then transform into world via `chassisWorld`.
    * hip/grips/pegs are chassis-local.
    */
-  pose(spec: VehicleSpec, chassisWorld: Matrix4, gripL: Vector3, gripR: Vector3, shift: number, lat: number, speed: number, lean = 0) {
+  pose(spec: VehicleSpec, chassisWorld: Matrix4, gripL: Vector3, gripR: Vector3, shift: number, lat: number, speed: number, lean = 0, body: RiderBody = NO_BODY) {
     const G = spec.geo;
     const j = this.j;
     const crouch = Math.min(1, Math.abs(speed) / 18);
+    const stand = body.stand, accel = body.accel, foot = body.foot;
     // Hanging off: in a lean the rider slides the hips and drops the shoulders to the inside
     // (bike +x is its left, and a positive lean is to the right).
     const hang = Math.max(-1, Math.min(1, lean / 0.8)) * Math.min(1, Math.abs(speed) / 6);
-    j.hip.set(G.riderHip.x + lat * 0.07 - hang * 0.075, G.riderHip.y + 0.03 + shift * -0.03 - Math.abs(hang) * 0.02, G.riderHip.z - 0.06 + shift * 0.12);
+    // Standing on the pegs lifts the hips clear of the seat and over the pegs; a foot put down
+    // at a stop slides the hips a little toward it.
+    j.hip.set(
+      G.riderHip.x + lat * 0.07 - hang * 0.075 * (1 - stand) + foot * 0.035,
+      G.riderHip.y + 0.03 + shift * -0.03 - Math.abs(hang) * 0.02 + stand * 0.27,
+      G.riderHip.z - 0.06 + shift * 0.12 + stand * 0.1 - accel * 0.035,
+    );
     // Torso leans toward the bars, more when crouched/shifted forward; sits up in a wheelie.
-    const pitch = 0.62 + crouch * 0.18 + shift * 0.4;
+    // Acceleration rocks it back, braking pitches it forward; standing bends at the hips.
+    const pitch = 0.62 + crouch * 0.18 + shift * 0.4 - accel * 0.13 + stand * 0.12;
     const roll = lat * 0.25 - hang * 0.32;
     j.neck.set(Math.sin(roll) * LIMB.torso + j.hip.x, j.hip.y + Math.cos(pitch) * LIMB.torso, j.hip.z + Math.sin(pitch) * LIMB.torso);
     spineMid(j);
     j.head.copy(j.neck).add(this.v.set(0, 0.135, 0.07));
     // Eyes up the trail: the head pitches back against the torso lean.
-    j.headRot.setFromEuler(this.e.set(-(pitch - 0.5) * 0.4, 0, roll * 0.5));
+    // ...and turns toward where the bike is going.
+    j.headRot.setFromEuler(this.e.set(-(pitch - 0.5) * 0.4, body.look, roll * 0.5, 'YXZ'));
     const grips = [gripL, gripR];
     // Shoulders turn with the bars: the outside shoulder follows its grip forward.
     const twist = (gripL.z - gripR.z) * 0.5;
@@ -627,6 +651,11 @@ export class RiderModel {
       twoBoneIK(j.sh[i], j.wr[i], LIMB.uarm, LIMB.farm, armHint(s, _h), j.el[i]);
       j.hipS[i].copy(j.hip).add(this.v.set(s * 0.105, 0, 0));
       j.an[i].set(s * (G.peg.x + 0.05), G.peg.y + 0.08, G.peg.z - 0.02);
+      // Left foot (s = +1, the bike's left) goes down to the road at a stop.
+      if (i === 0 && foot > 0.001) {
+        this.v.set(s * (G.peg.x + 0.27), body.groundY + 0.09, G.peg.z + 0.18);
+        j.an[i].lerp(this.v, foot);
+      }
       twoBoneIK(j.hipS[i], j.an[i], LIMB.thigh, LIMB.shin, legHint(s, _h), j.kn[i]);
       j.toe[i].copy(j.an[i]).add(this.v.set(0, -0.03, 0.16));
     }

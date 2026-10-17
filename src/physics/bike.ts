@@ -466,7 +466,9 @@ export class BikeDynamics {
     const T = TUNING.steering;
     const surfF = this.front.surface, surfR = this.rear.surface;
     const mu = Math.min(sp.front.tire.mu[surfF], sp.rear.tire.mu[surfR]) * (arcade ? TUNING.assist.turn.grip : 1);
-    let maxLean = lerp(T.lowSpeedLean, T.maxLean, smoothstep(T.leanRampStart, T.leanRampEnd, av));
+    // Full lean in the everyday speed range; a little less at very high speed, where a full
+    // flick from one side to the other would otherwise snap the bike off the ground.
+    let maxLean = lerp(T.lowSpeedLean, T.maxLean, smoothstep(T.leanRampStart, T.leanRampEnd, av)) * (1 - 0.14 * smoothstep(26, 40, av));
     // Front washing out: the rider stands the bike up a little.
     maxLean *= 1 - 0.45 * this.assist * clamp(this.front.slide * 1.5, 0, 1);
     // Grip-limited lean: with assist the rider keeps a safety margin; at zero assist you can
@@ -1051,12 +1053,25 @@ export class BikeDynamics {
   private turnAssist(dt: number, steerIn: number, av: number) {
     const TA = TUNING.assist.turn;
     if (!this.front.grounded || !this.rear.grounded) return;
+    // Stability control: at speed a rear that starts stepping out is reeled back in (a slide
+    // at 120 km/h would otherwise become a spin); slow-speed drifts are left alone.
+    const spin = smoothstep(0.12, 0.35, Math.abs(this.rear.slipAngle)) * smoothstep(14, 22, av);
+    if (spin > 0) {
+      _tmp.set(-_hf.z, 0, _hf.x);
+      if (this.vel.x * _hf.x + this.vel.z * _hf.z > 0) this.vel.addScaledVector(_tmp, -this.vel.dot(_tmp) * Math.min(1, 10 * spin * dt));
+      const yr0 = this.angVel.dot(UP);
+      this.angVel.addScaledVector(UP, -yr0 * Math.min(1, 6 * spin * dt));
+    }
     const w = smoothstep(2.5, 6, av) * (1 - smoothstep(0.1, 0.3, Math.abs(this.rear.slipAngle)));
     if (w <= 0) return;
     const boost = lerp(1, TA.boost, smoothstep(6, 16, av));
     // Turning right (steer +) is a negative yaw rate about +Y.
+    // Coordinated turning: the yaw rate is the one the bike's lean balances (v·ω = g·tanφ),
+    // using a lean a little ahead of the actual one so the turn starts as the bike rolls in.
+    // The bike therefore never pivots tighter than it leans, as a real one cannot.
     const wantLean = Math.abs(steerIn) > 0.02 ? this.leanTarget : 0;
-    const yawT = -Math.sign(this.speed || 1) * (TUNING.gravity * Math.tan(clamp(wantLean, -1.1, 1.1)) / Math.max(av, 3)) * boost;
+    const useLean = this.lean + (wantLean - this.lean) * TA.ahead;
+    const yawT = -Math.sign(this.speed || 1) * (TUNING.gravity * Math.tan(clamp(useLean, -1.1, 1.1)) / Math.max(av, 3)) * boost;
     const yr = this.angVel.dot(UP);
     // Only ever helps the turn along: rotating faster than the target (a slide being
     // started) is left alone, the slide aids handle that.

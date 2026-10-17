@@ -79,6 +79,14 @@ instead of exploding it.
 - [x] PWA: manifest, icons, generated precaching service worker, offline fallback, cache versioning.
 - [x] Cloudflare Pages config (`_headers`, `wrangler.toml`, docs).
 - [x] 59 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] Round 8: realism and features. Broadleaf trees are alpha-tested leaf cards (`leafTexture`, `broadleafCards`,
+      alpha-to-coverage) over a shrunken dark core; façades weathered in the shader (`weathered`: contact shading at the
+      street, grime, rain streaks, per-building tone; `aGround` attribute). Turning is coordinated: the arcade yaw target
+      is the rate the lean balances (`turn.boost` 1.0, `ahead` 0.35, `align` 1.5, maxLean 0.95 tapering above 26 m/s),
+      plus a high-speed stability control against spins; test checks tanφ ≈ vω/g on the Varg. Rider body language
+      (`RiderBody`): left foot to the road at a stop, standing on the pegs in the air / rough ground, head turned into
+      the turn, torso rocked by acceleration and braking. Heading-up minimap (`ui/minimap.ts`, roads, buildings,
+      lake, traffic) and a best-wheelie record (distance shown live, saved in progress, shown on the menu).
 - [x] Round 7: landscape-only on phones. The "rotate your phone" overlay is gone (with iOS rotation lock on it could
       never clear). An upright phone draws the whole app rotated 90° into a landscape box (`ui/orient.ts`; touch, garage
       orbit and layout rects go through `toLocal` / `localRect`); e2e `portrait.spec.ts`. Held wheelies ("grau"):

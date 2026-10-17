@@ -107,6 +107,8 @@ export class UI {
         h('span', {}, 'Bike: ', h('b', {}, g.build.name)),
         h('span', {}, 'Charge cores: ', h('b', {}, `${g.collectedCount}/${g.data.collectibles.length}`)),
         h('span', {}, 'Medals: ', h('b', {}, String(medals))),
+        h('span', {}, 'Best wheelie: ', h('b', {}, g.save.data.progress.bestWheelie ? `${g.save.data.progress.bestWheelie} m` : '—')),
+        h('span', {}, 'Ridden: ', h('b', {}, `${(g.save.data.progress.distance / 1000).toFixed(1)} km`)),
         h('span', {}, 'Build: ', h('b', {}, __BUILD__)),
       ),
       h('p', { class: 'note', style: 'margin-top:14px' }, 'Every bike here is electric. Build it in the garage, then feel the difference on the street, the dirt and the test facilities. Works offline once installed.'),

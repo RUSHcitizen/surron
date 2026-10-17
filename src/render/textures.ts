@@ -560,3 +560,55 @@ export function showroomTexture(): CanvasTexture {
     return tex(c);
   });
 }
+
+/**
+ * Foliage card: a ragged cluster of individual leaves and twigs on a transparent background
+ * (alpha-tested), so tree crowns read as leaves with sky between them rather than solid blobs.
+ * Leaves are near-white-green and tinted by the tree's vertex colours.
+ */
+export function leafTexture(): CanvasTexture {
+  return cached('leaves', () => {
+    const S = 256;
+    const { c, g } = canvas(S, S);
+    const rnd = mulberry32(911);
+    // Twigs radiating from the centre.
+    g.strokeStyle = 'rgba(70,55,40,1)';
+    g.lineCap = 'round';
+    for (let i = 0; i < 9; i++) {
+      const a = rnd() * Math.PI * 2, l = 60 + rnd() * 50;
+      g.lineWidth = 2.2;
+      g.beginPath();
+      g.moveTo(S / 2, S / 2);
+      g.quadraticCurveTo(S / 2 + Math.cos(a + 0.3) * l * 0.5, S / 2 + Math.sin(a + 0.3) * l * 0.5, S / 2 + Math.cos(a) * l, S / 2 + Math.sin(a) * l);
+      g.stroke();
+    }
+    // Leaves: denser toward the centre, ragged at the rim.
+    for (let i = 0; i < 420; i++) {
+      const r = Math.sqrt(rnd()) * 118, a = rnd() * Math.PI * 2;
+      if (r > 70 && rnd() < (r - 70) / 60) continue;
+      const x = S / 2 + Math.cos(a) * r, y = S / 2 + Math.sin(a) * r;
+      const len = 16 + rnd() * 12, w = len * (0.38 + rnd() * 0.15);
+      const light = 150 + Math.floor(rnd() * 105);
+      const hueShift = Math.floor(rnd() * 40);
+      g.save();
+      g.translate(x, y);
+      g.rotate(a + (rnd() - 0.5) * 1.6);
+      g.fillStyle = `rgb(${light - 40 + hueShift},${light},${Math.floor(light * 0.62)})`;
+      g.beginPath();
+      g.moveTo(-len / 2, 0);
+      g.quadraticCurveTo(0, -w, len / 2, 0);
+      g.quadraticCurveTo(0, w, -len / 2, 0);
+      g.fill();
+      // Midrib / shaded half for a little depth.
+      g.fillStyle = 'rgba(0,30,0,0.18)';
+      g.beginPath();
+      g.moveTo(-len / 2, 0);
+      g.quadraticCurveTo(0, w, len / 2, 0);
+      g.closePath();
+      g.fill();
+      g.restore();
+    }
+    const t = tex(c);
+    return t;
+  });
+}

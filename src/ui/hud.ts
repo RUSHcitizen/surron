@@ -2,6 +2,7 @@
 import { RIDE_MODES } from '../physics/tuning';
 import type { Game } from '../game/game';
 import { h } from './dom';
+import { Minimap } from './minimap';
 
 export class Hud {
   el: HTMLDivElement;
@@ -23,6 +24,8 @@ export class Hud {
   private fps!: HTMLElement;
   private pops!: HTMLElement;
   private textTimer = 0;
+  private map: Minimap;
+  private mapTick = 0;
 
   constructor(private game: Game, parent: HTMLElement) {
     this.el = h('div', { class: 'hud' });
@@ -60,7 +63,8 @@ export class Hud {
     this.ch = h('div', { class: 'hud-challenge' }, this.arrow, this.chText, h('button', { class: 'x', 'aria-label': 'Quit challenge', onclick: () => { this.game.endChallenge(); } }, '✕'));
     this.fps = h('div', { class: 'hud-fps' });
     this.pops = h('div');
-    this.el.append(speedo, this.tele, h('div', { class: 'hud-score' }, this.trick, this.chain, this.total), this.ch, this.fps, this.pops);
+    this.map = new Minimap(game);
+    this.el.append(speedo, this.map.el, this.tele, h('div', { class: 'hud-score' }, this.trick, this.chain, this.total), this.ch, this.fps, this.pops);
     parent.append(this.el);
   }
 
@@ -85,6 +89,8 @@ export class Hud {
     const b = g.bike;
     const pt = b.pt;
     const s = g.settings;
+    // Minimap at half the frame rate: smooth enough, half the canvas work.
+    if ((this.mapTick = (this.mapTick + 1) % 2) === 0) this.map.draw();
     // Bars every frame
     const peakKw = b.spec.powertrain.maxPower / 1000;
     this.power.style.width = `${Math.max(0, Math.min(100, (pt.powerKw / peakKw) * 100))}%`;
@@ -145,7 +151,7 @@ export class Hud {
         `Surface <b>${b.rear.grounded ? b.rear.surface : 'air'}</b>`;
     }
     const sc = g.scorer;
-    this.trick.textContent = sc.live && sc.live.points > 10 ? `${sc.live.name} ${sc.live.points}` : '';
+    this.trick.textContent = sc.live && sc.live.points > 10 ? `${sc.live.name} · ${sc.live.points}` : '';
     this.chain.textContent = sc.chain > 0 ? `Combo ${sc.chain} × ${sc.multiplier}` : '';
     this.total.textContent = sc.total > 0 ? `Score ${sc.total.toLocaleString()}` : '';
     if (ch) this.chText.textContent = `${ch.def.name}: ${ch.progressText}`;

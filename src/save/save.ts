@@ -47,6 +47,8 @@ export interface Progress {
   distance: number;
   bestDrift: number;
   bestStunt: number;
+  /** Longest wheelie, m. */
+  bestWheelie: number;
   measured: Record<string, MeasuredRecord>;
 }
 
@@ -75,7 +77,7 @@ export function defaultSave(): SaveData {
     settings: defaultSettings(),
     builds: PRESETS.map((b) => ({ ...cloneBuild(b), id: `my-${b.id}` })),
     selectedBuildId: `my-${PRESETS[0].id}`,
-    progress: { collected: [], medals: {}, distance: 0, bestDrift: 0, bestStunt: 0, measured: {} },
+    progress: { collected: [], medals: {}, distance: 0, bestDrift: 0, bestStunt: 0, bestWheelie: 0, measured: {} },
     bindings: structuredClone(DEFAULT_BINDINGS),
   };
 }
@@ -153,6 +155,7 @@ export function migrate(raw: unknown): SaveData {
       distance: num(p.distance, 0, 1e9, 0),
       bestDrift: num(p.bestDrift, 0, 1e9, 0),
       bestStunt: num(p.bestStunt, 0, 1e9, 0),
+      bestWheelie: num(p.bestWheelie, 0, 1e9, 0),
       measured,
     },
     bindings,

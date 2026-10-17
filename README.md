@@ -105,6 +105,8 @@ The service worker is only registered in production builds (`npm run build && np
     Leaning, sliding, landings and slow bumps never throw you off; a bike that tips over
     is stood back up. **Realistic** (Settings → Riding) brings back lowsides, endos and hard-landing crashes.
   * Wheelie and stoppie buttons work at any speed (the rider pops the front with body weight).
+  * Coordinated turning: the bike turns exactly as tight as its lean balances (tanφ = v²/(gR)), leaning up to about
+    54°, with stability control against high-speed spins.
   * Xtreme Motorbikes-style held wheelies ("grau"): the wheelie button holds the balance point indefinitely; on the back
     wheel the bike steers by body weight (yaw, roll and pitch are controlled separately so they never fight), the stick
     sets the height, and the throttle drives on.

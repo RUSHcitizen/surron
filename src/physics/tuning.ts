@@ -50,7 +50,7 @@ export const TUNING = {
     /** Max steering rate, rad/s. */
     rate: 5.5,
     /** Max lean angle at speed (rad). */
-    maxLean: 0.86,
+    maxLean: 0.95,
     /** Lean available at walking pace (rad). */
     lowSpeedLean: 0.16,
     /** Speed (m/s) range over which lean authority ramps in. */
@@ -94,8 +94,9 @@ export const TUNING = {
      *  alignment with the heading (1/s), how much tighter than lean alone it turns, the
      *  rider's body-lean roll-rate tracking (1/s), the faster flick (× maxRollRate) and how
      *  much of the countersteer is left; the bars lead the lean by this fraction of the error;
-     *  extra side grip of the tyres (arcade cornering). */
-    turn: { rate: 30, align: 4, boost: 2.2, roll: 30, rollRate: 2.1, counter: 0.3, lead: 0.7, grip: 1.3 },
+     *  extra side grip of the tyres (arcade cornering); how far ahead of the actual lean the
+     *  coordinated yaw target looks (0 = lean only, 1 = target lean). */
+    turn: { rate: 30, align: 1.5, boost: 1.0, roll: 30, rollRate: 2.1, counter: 0.3, lead: 0.7, grip: 1.3, ahead: 0.35 },
         catchStiffness: 1400,
     catchDamping: 260,
     slideRollStiffness: 900,

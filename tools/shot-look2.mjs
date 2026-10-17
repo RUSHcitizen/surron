@@ -25,6 +25,7 @@ for (const [name, x, z, yaw] of spots) {
   await page.evaluate(([x, z, yaw]) => { const g = window.voltline; g.bike.place(+x, +z, +yaw); g.cam.snap(); }, [x, z, yaw]);
   await gameWait(1.2);
   await page.screenshot({ path: `${out}-${name}.png` });
+  logs.push(`[${name}] ` + JSON.stringify(await page.evaluate(() => { const g = window.voltline; return { calls: g.post?.sceneCalls, tris: g.post?.sceneTris }; })));
 }
 if (process.env.WHEELIE) {
   const [x, z, yaw] = process.env.WHEELIE.split(':').map(Number);

@@ -27,6 +27,7 @@ it('steer', () => {
     const ss = yaw.slice(-240).reduce((a, x) => a + x, 0) / 240;
     const t50 = yaw.findIndex((y) => y > ss * 0.5) * dt, t90 = yaw.findIndex((y) => y > ss * 0.9) * dt;
     const peak = Math.max(...yaw); const wrong = Math.min(...yaw);
-    process.stdout.write(`${p.id.padEnd(8)} v${String(v).padEnd(3)} t50 ${t50.toFixed(2)} t90 ${t90.toFixed(2)} R ${(bike.speed / Math.max(ss, 1e-3)).toFixed(1)}m yaw ${ss.toFixed(2)} over ${((peak / ss - 1) * 100).toFixed(0)}% wrong ${wrong.toFixed(2)} lean ${maxLean.toFixed(2)} v ${bike.speed.toFixed(1)} ${bike.crashed ? 'CRASH' : ''}\n`);
+    const coord = Math.tan(Math.abs(bike.lean)) / Math.max(1e-3, (bike.speed * ss) / 9.81);
+    process.stdout.write(`coord ${coord.toFixed(2)} ${p.id.padEnd(8)} v${String(v).padEnd(3)} t50 ${t50.toFixed(2)} t90 ${t90.toFixed(2)} R ${(bike.speed / Math.max(ss, 1e-3)).toFixed(1)}m yaw ${ss.toFixed(2)} over ${((peak / ss - 1) * 100).toFixed(0)}% wrong ${wrong.toFixed(2)} lean ${maxLean.toFixed(2)} v ${bike.speed.toFixed(1)} ${bike.crashed ? 'CRASH' : ''}\n`);
   }
 });
