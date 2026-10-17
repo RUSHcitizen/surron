@@ -253,7 +253,8 @@ export class BikeModel {
     const rimM = this.mat(new MeshStandardMaterial({ color: V.rimColor, roughness: 0.3, metalness: 0.7 }));
     const seatM = this.mat(new MeshStandardMaterial({ color: V.seatColor, roughness: 0.85 }));
     const gripM = this.mat(new MeshStandardMaterial({ color: V.gripColor ?? '#1b1d22', roughness: 0.75 }));
-    const forkM = this.mat(new MeshStandardMaterial({ color: V.forkColor ?? '#c0c4cc', roughness: 0.22, metalness: 0.9 }));
+    // Satin rather than mirror: a mirror-smooth tube streaks white with sky reflections (and blooms).
+    const forkM = this.mat(new MeshStandardMaterial({ color: V.forkColor ?? '#aeb3bb', roughness: 0.34, metalness: 0.85 }));
     const livery = this.mat(new MeshPhysicalMaterial({
       map: liveryTexture(V.plasticColor, V.decal, V.decalColor, V.accentColor, V.number),
       roughness: fin.roughness, metalness: fin.metalness * 0.5, clearcoat: gloss, clearcoatRoughness: 0.12,

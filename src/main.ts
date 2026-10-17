@@ -1,6 +1,10 @@
 import './ui/styles.css';
 import { Game } from './game/game';
 import { registerServiceWorker } from './pwa/register';
+import { initOrientation } from './ui/orient';
+
+// Before anything lays out: phones always get a landscape app, even held upright.
+initOrientation();
 
 function webglAvailable() {
   try {

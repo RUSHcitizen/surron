@@ -129,12 +129,18 @@ export const TUNING = {
 
   /** Wheelie / stoppie trick buttons (see BikeDynamics.step). Pitch in rad, times in s. */
   tricks: {
-    /** Initial target pitch for the wheelie button (a comfortable wheelie). */
-    wheelieBase: 0.5,
-    /** Hold time before the target starts creeping up. */
+    /** Target pitch for the wheelie button (a comfortable, cruising wheelie). The button holds
+     * it for as long as it is held; the lean stick moves it (back = higher, forward = lower). */
+    wheelieBase: 0.55,
+    /** How far the lean stick moves the wheelie target, rad at full deflection. */
+    wheelieStick: 0.5,
+    /** Yaw rate (rad/s) at full steer while riding a wheelie (arcade). */
+    wheelieYaw: 0.9,
+    /** Extra drive (m/s²) at full throttle while holding a wheelie (arcade), so you can
+     * accelerate on the back wheel instead of the throttle only holding the balance. */
+    wheeliePush: 2.6,
+    /** Hold time before the stoppie target starts creeping up. */
     holdGrace: 1.5,
-    /** Target pitch increase per second of holding after the grace time. */
-    wheelieRamp: 0.33,
     /** Base throttle used to hold the wheelie. */
     wheelieThrottle: 0.45,
     /** Pitch at which the rider can no longer save it and falls off the back. */

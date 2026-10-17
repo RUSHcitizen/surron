@@ -314,9 +314,42 @@ describe('trick buttons', () => {
     expect(bike.crashed).toBe(false);
     expect(bike.front.grounded).toBe(true);
   });
-  it('holding the wheelie button too long loops out: the rider falls off the back', () => {
+  it('arcade: the wheelie button holds a balance-point wheelie as long as it is held, on every bike', () => {
+    for (const p of PRESETS) {
+      const bike = makeBike(computeVehicleSpec(p), flatWorld(4000, 'asphalt'));
+      settle(bike);
+      run(bike, 20, (_t, b) => ({ ...emptyInput(), throttle: cruise(8)(b) }), (_t, b) => b.speed >= 7.8);
+      let minP = 9, maxP = 0, down = 0;
+      run(bike, 12, () => ({ ...emptyInput(), wheelie: 1 }), (t, b) => {
+        if (t < 2) return;
+        minP = Math.min(minP, b.pitch);
+        maxP = Math.max(maxP, b.pitch);
+        if (b.front.grounded) down++;
+      });
+      expect(bike.crashed, p.id).toBe(false);
+      expect(down, p.id).toBe(0);
+      expect(minP, p.id).toBeGreaterThan(0.4);
+      expect(maxP, p.id).toBeLessThan(0.75);
+    }
+  });
+  it('arcade: steering on the back wheel turns the bike and the stick sets the wheelie height', () => {
+    const bike = rolling(10);
+    const yaw0 = bike.yaw;
+    run(bike, 4, () => ({ ...emptyInput(), wheelie: 1, steer: 1 }));
+    expect(bike.front.grounded).toBe(false);
+    expect(bike.crashed).toBe(false);
+    expect(Math.abs(bike.yaw - yaw0)).toBeGreaterThan(0.8);
+    run(bike, 2, () => ({ ...emptyInput(), wheelie: 1, lean: -1 }));
+    const high = bike.pitch;
+    run(bike, 2, () => ({ ...emptyInput(), wheelie: 1, lean: 1 }));
+    expect(high).toBeGreaterThan(0.8);
+    expect(bike.pitch).toBeLessThan(0.3);
+    expect(bike.crashed).toBe(false);
+  });
+  it('realistic rule: pulling the wheelie past the balance point loops out', () => {
     const bike = rolling(5.5);
-    run(bike, 5, () => ({ ...emptyInput(), wheelie: 1 }));
+    bike.crashRule = 'realistic';
+    run(bike, 5, () => ({ ...emptyInput(), wheelie: 1, lean: -1 }));
     expect(bike.crashed).toBe(true);
     expect(bike.crashCause).toBe('looped out');
   });

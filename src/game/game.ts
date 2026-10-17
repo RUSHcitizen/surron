@@ -41,7 +41,7 @@ export type GameState = 'menu' | 'ride' | 'pause' | 'garage';
 
 const QUALITY: Record<Settings['quality'], Quality> = {
   low: { shadows: false, shadowSize: 512, trees: 450, pixelRatio: 1, drawDistance: 260 },
-  medium: { shadows: true, shadowSize: 1024, trees: 900, pixelRatio: 1.5, drawDistance: 380 },
+  medium: { shadows: true, shadowSize: 2048, trees: 900, pixelRatio: 1.5, drawDistance: 380 },
   high: { shadows: true, shadowSize: 2048, trees: 1500, pixelRatio: 2, drawDistance: 520 },
 };
 
@@ -104,7 +104,7 @@ export class Game {
   private perf = { t: 0, frames: 0, slow: 0, cooldown: 0, ceiling: 99 };
   onFrame: ((dt: number) => void) | null = null;
 
-  constructor(private container: HTMLElement) {
+  constructor(readonly container: HTMLElement) {
     this.renderer = new WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
@@ -236,8 +236,9 @@ export class Game {
     this.sun.shadow.map?.dispose();
     (this.sun.shadow as { map: unknown }).map = null;
     const sc = this.sun.shadow.camera;
-    sc.left = sc.bottom = -35;
-    sc.right = sc.top = 35;
+    // Tight around the rider so the bike's own shadow is crisp (texels ~2-3 cm).
+    sc.left = sc.bottom = -28;
+    sc.right = sc.top = 28;
     sc.near = 1;
     sc.far = 200;
     sc.updateProjectionMatrix();
@@ -278,7 +279,8 @@ export class Game {
   }
 
   setTimeOfDay(mode: Settings['timeOfDay']) {
-    const dir = mode === 'day' ? new Vector3(0.55, 0.6, 0.42) : mode === 'sunset' ? new Vector3(-0.8, 0.2, 0.4) : new Vector3(0.3, 0.5, -0.4);
+    // Day: a high sun (~58°) so the city streets are sunlit between the buildings.
+    const dir = mode === 'day' ? new Vector3(0.42, 0.85, 0.3) : mode === 'sunset' ? new Vector3(-0.8, 0.2, 0.4) : new Vector3(0.3, 0.5, -0.4);
     dir.normalize();
     this.view.setTimeOfDay(mode, dir);
     this.sunDir.copy(dir);
@@ -287,7 +289,7 @@ export class Game {
     if (mode === 'day') {
       // Bright, contrasty sunshine: strong key light, restrained sky fill.
       this.sun.color.set(0xffefd6); this.sun.intensity = 3.3;
-      this.hemi.color.set(0xdde3ea); this.hemi.groundColor.set(0x6e6250); this.hemi.intensity = 0.6;
+      this.hemi.color.set(0xe2e6ea); this.hemi.groundColor.set(0x7a6a55); this.hemi.intensity = 0.72;
       fog.color.set(0xbfd6ec); this.renderer.toneMappingExposure = 0.86;
       this.scene.environmentIntensity = 0.5;
     } else if (mode === 'sunset') {
@@ -628,7 +630,7 @@ export class Game {
       else if (e.type === 'crash') {
         this.audio.impact(1, 'crash');
         this.cam.bump(0.8);
-        const why = e.cause === 'looped out' ? 'Looped out! You held the wheelie too long. ' : e.cause === 'over the bars' ? 'Over the bars! ' : e.cause === 'car' ? 'Hit by traffic! ' : 'Crashed! ';
+        const why = e.cause === 'looped out' ? 'Looped out! You pulled the wheelie too high. ' : e.cause === 'over the bars' ? 'Over the bars! ' : e.cause === 'car' ? 'Hit by traffic! ' : 'Crashed! ';
         this.ui.toast(`${why}Press R / ⟲ to reset (auto in 3 s)`, 2800);
       }
     }
@@ -666,8 +668,8 @@ export class Game {
       paused: false,
     }, dt);
     if (this.touch.isVisible) {
-      // Danger meter: full at roughly the hold time where the bikes loop out (~2.8 s).
-      this.touch.setWheelieHold(b.wheelieHold > 0 ? (b.wheelieHold - 0.6) / 2.2 : 0);
+      // Wheelie meter: how high the front is (full = near the loop-out angle).
+      this.touch.setWheelieHold(b.wheelieHold > 0 ? Math.max(0, b.pitch) / 1.1 : 0);
       this.touch.setBoost(this.boostMeter);
     }
     this.ui.hud.update(dt);

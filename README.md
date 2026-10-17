@@ -37,7 +37,7 @@ The service worker is only registered in production builds (`npm run build && np
 | **A D** / ← → | Steer. The rider leans and countersteers for you |
 | **Q** / Shift | Lean back: wheelie, pull up in the air |
 | **E** | Lean forward: keep the front down, stoppie, push down in the air |
-| **Z** | **Wheelie button** (hold). Pops and holds a wheelie; hold it too long (about 3 s) and you loop out and fall off the back |
+| **Z** | **Wheelie button** (hold). Pops a wheelie and rides it at the balance point for as long as you hold it. Steer to turn on the back wheel, lean back / forward to raise or lower the front, add throttle to pull harder (Realistic crash rule: pull it past the balance point and you loop out) |
 | **X** | **Stoppie button** (hold). Weight forward plus front brake; too long at speed sends you over the bars |
 | **F** | **Boost** (hold): a few seconds of electric overboost. Refills slowly, and faster from tricks and near misses |
 | **R** | Reset to the last safe spot |
@@ -101,10 +101,13 @@ The service worker is only registered in production builds (`npm run build && np
   * Weight transfer that produces wheelies and stoppies.
   * A rider controller that countersteers to reach the lean you ask for.
   * Adjustable assist: balance, lean margin, and rider instincts at the stoppie, loop-out and slide limits.
-  * **Crashes: "Big hits only" (default)**: you only crash when you hit something (a wall, tree, pole) at 30 mph or more, or
-    when you loop out a held wheelie. Leaning, sliding, landings and slow bumps never throw you off; a bike that tips over
+  * **Crashes: "Big hits only" (default)**: you only crash when you hit something (a wall, tree, pole) at 30 mph or more.
+    Leaning, sliding, landings and slow bumps never throw you off; a bike that tips over
     is stood back up. **Realistic** (Settings → Riding) brings back lowsides, endos and hard-landing crashes.
   * Wheelie and stoppie buttons work at any speed (the rider pops the front with body weight).
+  * Xtreme Motorbikes-style held wheelies ("grau"): the wheelie button holds the balance point indefinitely; on the back
+    wheel the bike steers by body weight (yaw, roll and pitch are controlled separately so they never fight), the stick
+    sets the height, and the throttle drives on.
 * **Electric powertrain**:
   * Torque curve with back-EMF fade, controller current and battery power limits.
   * Battery voltage sag and state of charge.
@@ -215,7 +218,7 @@ npm run deploy        # = npm run build && npx wrangler deploy
     * turn equilibrium vs. tanφ = v²/(gR); right-steer → right-lean; low-speed U-turn; slaloms at 3 speeds
     * held wheelies; sustained dirt power slides; traction control suppressing slides
     * kicker jump landing; curb climbing; 40 s random-input fuzz (no NaN); crash/reset recovery
-    * trick buttons: a short wheelie hold lifts the front safely, holding too long loops out, the stoppie button lifts the rear,
+    * trick buttons: a short wheelie hold lifts the front safely, a 12 s hold stays up on every preset, steering and height control on the back wheel, loop-out under the Realistic rule, the stoppie button lifts the rear,
       and the wheelie button works at 50 km/h on every preset
     * traffic: 5 minutes of city flow with no car-on-car contact or gridlock, cars braking for a bike in their lane,
       30+ mph car hits crashing (including a car driving into a stopped bike) and slow bumps not

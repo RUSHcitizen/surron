@@ -33,8 +33,7 @@ export class UI {
     this.toasts = h('div', { class: 'toasts', role: 'status', 'aria-live': 'polite' });
     this.hud = new Hud(game, this.layer);
     this.garage = new Garage(game, this.layer);
-    const rotate = h('div', { class: 'rotate-hint' }, h('div', { class: 'icon' }, '📱'), h('b', {}, 'Rotate your phone'), h('span', { class: 'note' }, 'Stark Varg EBike plays best in landscape.'));
-    this.layer.append(this.screen, this.toasts, rotate);
+    this.layer.append(this.screen, this.toasts);
     root.append(this.layer);
     // Prevent iOS double-tap zoom / gesture zoom while playing.
     for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
@@ -207,7 +206,7 @@ export class UI {
       if (t === 'gameplay') {
         body.append(
           segmented('Crashes', [{ id: 'arcade', name: 'Big hits only' }, { id: 'realistic', name: 'Realistic' }] as const, s.crashes, (v) => set('crashes', v)),
-          h('div', { class: 'note' }, 'Big hits only: you crash only when you hit something at 30+ mph (or loop out a held wheelie). Leaning, sliding and landings never throw you off, and a tipped bike stands back up. Realistic: lowsides, endos and hard landings count.'),
+          h('div', { class: 'note' }, 'Big hits only: you crash only when you hit something at 30+ mph. Leaning, sliding and landings never throw you off, and a tipped bike stands back up. Realistic: lowsides, endos and hard landings count.'),
           slider('Rider assist', s.assist, 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`, (v) => set('assist', v)),
           h('div', { class: 'note' }, 'Assist = balance help, lean margin, and rider instincts (easing brake/throttle at the stoppie, loop-out and slide limits). 0% is raw physics: lowsides, loop-outs and endos are on you.'),
           slider('Steering sensitivity', s.steerSensitivity, 0.4, 2, 0.05, (v) => v.toFixed(2), (v) => set('steerSensitivity', v)),
@@ -304,7 +303,7 @@ export class UI {
       [h('span', {}, k('steerLeft'), ' ', k('steerRight')), 'Steer — the rider leans the bike and countersteers for you'],
       [k('leanBack'), 'Lean back: shift weight / pop a wheelie / pull up in the air'],
       [k('leanForward'), 'Lean forward: keep the front down / stoppie / push down in the air'],
-      [k('wheelie'), 'WHEELIE button: hold to pop and hold a wheelie. Hold it too long (~3 s) and you loop out off the back!'],
+      [k('wheelie'), 'WHEELIE button: hold to ride a wheelie for as long as you like. Steer to turn on the back wheel, lean back/forward to raise or lower the front, throttle to pull harder.'],
       [k('stoppie'), 'STOPPIE button: hold for a stoppie (weight forward + front brake). Too long at speed = over the bars.'],
       [k('reset'), 'Reset bike to the last safe spot'],
       [k('camera'), 'Cycle camera (chase / far / helmet)'],
@@ -319,7 +318,7 @@ export class UI {
       h('div', { class: 'g-section' }, 'Touch (landscape)'),
       h('p', { class: 'note' }, 'Left stick: steer (left/right) and lean (up = forward, down = back). Right: tall THROTTLE pad (slide up for more), FRONT and REAR brake buttons, and WHEELIE / STOPPIE trick buttons above the brakes. The wheelie button fills red the longer you hold it: let go before it is full or you fall off the back. Top-right: pause, reset, camera, ride mode. Drag the upper-right area to look around. All buttons work simultaneously.'),
       h('div', { class: 'g-section' }, 'Tips'),
-      h('p', { class: 'note' }, 'Drifts: on dirt, steer into a turn and roll on the throttle with a torquey motor — or tap the rear brake to unsettle the rear, then hold throttle and let the bars follow the slide. Wheelies: lean back + throttle, then feather the throttle to hold the balance point; tap the rear brake to drop the front. Jumps: neutral bars for a level landing, lean to rotate. Customize in the garage: gearing, tires and suspension all change the physics.'),
+      h('p', { class: 'note' }, 'Drifts: on dirt, steer into a turn and roll on the throttle with a torquey motor — or tap the rear brake to unsettle the rear, then hold throttle and let the bars follow the slide. Wheelies: hold WHEELIE (Z) to ride on the back wheel for as long as you like; steer to turn on one wheel, lean back/forward to raise or lower the front, add throttle to pull harder. Or do it by hand: lean back + throttle and feather it at the balance point; tap the rear brake to drop the front. Jumps: neutral bars for a level landing, lean to rotate. Customize in the garage: gearing, tires and suspension all change the physics.'),
       h('div', { class: 'btn-row', style: 'margin-top:14px' }, h('button', { class: 'btn primary', onclick: () => (back === 'menu' ? this.showMenu() : this.showPause()) }, 'Back')),
     ));
   }

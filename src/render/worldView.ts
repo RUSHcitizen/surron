@@ -16,7 +16,7 @@ import type { FacadeStyle } from './textures';
 import { fbm } from '../core/noise';
 
 const SURF_COLOR: Record<string, [number, number, number]> = {
-  asphalt: [0.17, 0.18, 0.2],
+  asphalt: [0.25, 0.25, 0.255],
   concrete: [0.47, 0.47, 0.45],
   dirt: [0.5, 0.36, 0.23],
   grass: [0.3, 0.44, 0.17],
@@ -63,8 +63,16 @@ function terrainMaterial(map: CanvasTexture) {
           float mid = vnoise(p * 0.6);
           // The finest detail only matters close to the camera; skip it far away.
           float fine = near > 0.0 ? vnoise(p * 3.1) : 0.5;
-          // Asphalt: darker patches + light aggregate speckle.
-          float asp = 0.88 + big * 0.22 + (fine - 0.5) * 0.12 * near;
+          // Asphalt: worn tone, darker repair patches with crisp edges, sealed tar-snake
+          // cracks, oil blotches and light aggregate speckle.
+          float asp = 0.84 + big * 0.26 + (fine - 0.5) * 0.14 * near;
+          vec2 pc = floor(p / 7.0), pf = fract(p / 7.0);
+          float patchy = step(0.86, vhash(pc + 17.0)) * step(0.12, min(pf.x, pf.y)) * step(min(pf.x, pf.y), 0.88) * step(max(pf.x, pf.y), 0.88);
+          asp *= 1.0 - patchy * 0.16;
+          // Thin, broken-up sealed cracks (only in some stretches, fading with distance).
+          float tar = 1.0 - abs(vnoise(p * 0.3 + vec2(3.7, 1.3)) * 2.0 - 1.0);
+          asp *= 1.0 - smoothstep(0.985, 0.997, tar) * 0.22 * near * smoothstep(0.62, 0.75, vnoise(p * 0.07 + 5.0));
+          asp *= 1.0 - smoothstep(0.7, 0.9, vnoise(p * 0.5 + 9.0)) * 0.18;
           // Concrete: 4 m slabs with dark joints and per-slab tone.
           vec2 cell = floor(p / 4.0); vec2 f = fract(p / 4.0);
           float joint = smoothstep(0.0, 0.012, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)));
@@ -267,9 +275,13 @@ function withTrunk(canopy: BufferGeometry, lift: number) {
 
 /** Clustered canopy of noisy blobs (origin at the trunk top). */
 function broadleafGeometry() {
-  const blobs: [number, number, number, number][] = [[0, 1.6, 0, 1.8], [1.0, 1.1, 0.4, 1.25], [-0.9, 1.2, -0.3, 1.3], [0.2, 2.5, -0.2, 1.2]];
+  // An open crown of separate leaf clumps (sky shows between them) rather than one blob.
+  const blobs: [number, number, number, number][] = [
+    [0, 1.7, 0, 1.25], [1.35, 1.25, 0.35, 0.95], [-1.25, 1.35, -0.25, 1.0], [0.3, 1.2, 1.3, 0.9], [-0.35, 1.3, -1.3, 0.95],
+    [0.85, 2.45, -0.5, 0.85], [-0.75, 2.5, 0.6, 0.85], [0.1, 3.1, 0.1, 0.75], [1.5, 2.0, 1.0, 0.65], [-1.55, 2.1, -1.0, 0.6],
+  ];
   const parts = blobs.map(([x, y, z, r], i) => {
-    const g = lumpGeometry(r, i === 0 ? 2 : 1, 0.22, i * 3.7);
+    const g = lumpGeometry(r, 1, 0.3, i * 3.7);
     g.translate(x, y, z);
     return g;
   });

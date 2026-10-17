@@ -11,8 +11,9 @@ export default defineConfig({
     launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] },
   },
   projects: [
-    { name: 'desktop', use: { viewport: { width: 1280, height: 720 } }, testIgnore: /mobile/ },
+    { name: 'desktop', use: { viewport: { width: 1280, height: 720 } }, testIgnore: /mobile|portrait/ },
     { name: 'mobile', use: { ...devices['iPhone 13 landscape'], browserName: 'chromium' }, testMatch: /mobile/ },
+    { name: 'portrait', use: { ...devices['iPhone 13'], browserName: 'chromium' }, testMatch: /portrait/ },
   ],
   webServer: {
     command: 'npm run build && npx vite preview --port 4173 --strictPort',

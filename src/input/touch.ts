@@ -12,6 +12,7 @@
  * two fingers on the same control never releases it by mistake.
  */
 import type { Action, Input } from './input';
+import { localRect, toLocal } from '../ui/orient';
 
 type Zone = 'stick' | 'cluster' | 'orbit';
 type Sub = 'throttle' | 'front' | 'rear' | 'wheelie' | 'stoppie' | 'boost' | null;
@@ -52,7 +53,7 @@ export class TouchControls {
       </div>
       <div class="t-right" data-zone="cluster">
         <div class="t-btn t-boost" data-sub="boost">BOOST</div>
-        <div class="t-btn t-trick t-wheelie" data-sub="wheelie">WHEELIE<small>hold · not too long!</small></div>
+        <div class="t-btn t-trick t-wheelie" data-sub="wheelie">WHEELIE<small>hold · stick sets height</small></div>
         <div class="t-btn t-trick t-stoppie" data-sub="stoppie">STOPPIE<small>hold</small></div>
         <div class="t-btn t-rear" data-sub="rear">REAR<small>brake</small></div>
         <div class="t-btn t-front" data-sub="front">FRONT<small>brake</small></div>
@@ -141,15 +142,17 @@ export class TouchControls {
     if (!this.visible) return;
     e.preventDefault();
     this.input.lastDevice = 'touch';
-    const p: Ptr = { zone, x: e.clientX, y: e.clientY, sub: null };
+    // App coordinates: the app may be drawn rotated on an upright phone.
+    const { x: ex, y: ey } = toLocal(e.clientX, e.clientY);
+    const p: Ptr = { zone, x: ex, y: ey, sub: null };
     if (zone === 'stick') {
       if (this.stickPtr !== -1) return; // one thumb steers
       this.stickPtr = e.pointerId;
       // Float the stick to where the thumb landed (kept fully inside its zone).
-      const zr = this.stickZone.getBoundingClientRect();
+      const zr = localRect(this.stickZone);
       const m = STICK_R + 14;
-      const ox = Math.min(zr.right - m, Math.max(zr.left + m, e.clientX));
-      const oy = Math.min(zr.bottom - m, Math.max(zr.top + m, e.clientY));
+      const ox = Math.min(zr.right - m, Math.max(zr.left + m, ex));
+      const oy = Math.min(zr.bottom - m, Math.max(zr.top + m, ey));
       this.stickOrigin = { x: ox, y: oy };
       const half = this.stickBase.offsetWidth / 2;
       this.stickBase.style.left = `${ox - zr.left - half}px`;
@@ -158,11 +161,11 @@ export class TouchControls {
       this.stickBase.style.right = 'auto';
       this.stickBase.classList.add('pressed');
     } else if (zone === 'cluster') {
-      const rr = (k: Btn) => this.btn[k].getBoundingClientRect();
+      const rr = (k: Btn) => localRect(this.btn[k]);
       this.rects = { throttle: rr('throttle'), front: rr('front'), rear: rr('rear'), wheelie: rr('wheelie'), stoppie: rr('stoppie'), boost: rr('boost') };
     }
     this.ptrs.set(e.pointerId, p);
-    this.apply(e.pointerId, p, e.clientX, e.clientY);
+    this.apply(e.pointerId, p, ex, ey);
     if (zone !== 'orbit') navigator.vibrate?.(5);
   }
 
@@ -170,7 +173,8 @@ export class TouchControls {
     const p = this.ptrs.get(e.pointerId);
     if (!p) return;
     e.preventDefault();
-    this.apply(e.pointerId, p, e.clientX, e.clientY);
+    const q = toLocal(e.clientX, e.clientY);
+    this.apply(e.pointerId, p, q.x, q.y);
   };
 
   private onUp = (e: PointerEvent) => {
@@ -243,7 +247,7 @@ export class TouchControls {
   }
   private lastBoost = '';
 
-  /** 0..1 danger meter on the wheelie button (1 = about to loop out). */
+  /** 0..1 wheelie-height meter on the wheelie button (1 = near the loop-out angle). */
   setWheelieHold(f: number) {
     const v = Math.max(0, Math.min(1, f)).toFixed(2);
     if (v !== this.lastHold) {

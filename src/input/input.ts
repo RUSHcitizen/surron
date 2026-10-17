@@ -8,7 +8,7 @@ export type Action =
 
 export const ACTION_LABELS: Record<Action, string> = {
   throttle: 'Throttle', frontBrake: 'Front brake', rearBrake: 'Rear brake', steerLeft: 'Steer left', steerRight: 'Steer right',
-  leanForward: 'Lean forward', leanBack: 'Lean back / wheelie', wheelie: 'Wheelie (hold — too long loops out!)', stoppie: 'Stoppie (hold)', boost: 'Boost (hold)', reset: 'Reset bike', camera: 'Change camera', pause: 'Pause',
+  leanForward: 'Lean forward', leanBack: 'Lean back / wheelie', wheelie: 'Wheelie (hold to ride it; lean sets the height)', stoppie: 'Stoppie (hold)', boost: 'Boost (hold)', reset: 'Reset bike', camera: 'Change camera', pause: 'Pause',
   garage: 'Garage', mode: 'Ride mode', hud: 'Toggle HUD', lights: 'Headlight',
 };
 

@@ -96,7 +96,7 @@ const smoothstep = (a: number, b: number, x: number) => {
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 // Scratch
-const _fwd = tv(), _up = tv(), _left = tv(), _hf = tv();
+const _fwd = tv(), _up = tv(), _left = tv(), _hf = tv(), _lh = tv(), _rates = tv();
 const _mount = tv(), _axis = tv(), _wf = tv(), _wa = tv(), _down = tv(), _pf = tv(), _o = tv(), _start = tv(), _rayDir = tv();
 const _n = tv(), _f = tv(), _l = tv(), _r = tv(), _vc = tv(), _F = tv(), _T = tv(), _tmp = tv(), _tmp2 = tv(), _gc = tv();
 const _pw = tv(), _vp = tv(), _q = new Quaternion(), _m3 = new Matrix3(), _m3t = new Matrix3(), _m4 = new Matrix4();
@@ -123,6 +123,12 @@ export class BikeDynamics {
   maxLeanNow = 0.8;
   /** How long the wheelie / stoppie buttons have been held, s. */
   wheelieHold = 0;
+  /** Player throttle while the wheelie button is held (drives the arcade wheelie cruise). */
+  private wheelieThrottle = 0;
+  private wheelieTarget = 0;
+  private wheelieCap = 17;
+  /** Eased yaw rate while riding a wheelie (wheelieControl). */
+  private wYaw = 0;
   stoppieHold = 0;
   /** User balance assist level 0..1. */
   assist = 0.65;
@@ -315,9 +321,9 @@ export class BikeDynamics {
     const grounded = this.front.grounded || this.rear.grounded;
 
     // --- Trick buttons -------------------------------------------------------------
-    // WHEELIE: the rider sits back and rides the throttle to a target pitch that rises the
-    // longer the button is held. A short hold gives a controlled wheelie; hold too long and
-    // the target passes the balance point, the bike loops out and the rider falls off the back.
+    // WHEELIE: the rider sits back and rides the throttle to a balance-point target and holds
+    // it for as long as the button is held. The lean stick raises (back) or lowers (forward)
+    // the front; pull it too far back and the bike can loop out over the rear.
     // STOPPIE: weight forward and a modulated front brake toward a nose-down target that also
     // grows with hold time (too long at speed = over the bars).
     // While a button is held the matching rider instinct and wheelie control are bypassed.
@@ -330,7 +336,10 @@ export class BikeDynamics {
     // Pitch torque scale: about what it takes to hold this bike + rider at a given pitch.
     const liftScale = (m * g * 0.55) / 0.5;
     if (wheelieBtn) {
-      const target = TR.wheelieBase + Math.max(0, this.wheelieHold - TR.holdGrace) * TR.wheelieRamp;
+      const target = clamp(TR.wheelieBase - leanIn * TR.wheelieStick, 0.22, arcade ? 0.95 : 1.08);
+      this.wheelieTarget = target;
+      // The button alone cruises on the back wheel; more throttle drives harder.
+      this.wheelieThrottle = Math.max(thr, 0.45);
       const rateUp = -this.angVel.dot(_left);
       // At speed the motor alone cannot pull the front up (no clutch to dump), so the rider
       // pops it with body weight and holds the balance point: a pitch torque toward the
@@ -343,9 +352,14 @@ export class BikeDynamics {
       leanIn = -1;
       fb = 0;
       rb = 0;
+      // Arcade: the balance is held directly (wheelieBalance), so the throttle only sets the
+      // pace: button alone cruises to about 60 km/h, full throttle keeps pulling to about 120.
+      this.wheelieCap = lerp(17, 34, smoothstep(0.45, 1, this.wheelieThrottle));
       thr = this.front.grounded && this.pitch < 0.08
         ? 1
-        : clamp(TR.wheelieThrottle + (target - this.pitch) * 2.6 - rateUp * 0.45, 0, 1);
+        : arcade
+          ? this.wheelieThrottle * (1 - smoothstep(this.wheelieCap - 4, this.wheelieCap, av)) * clamp(1 - (this.pitch - target) * 6, 0, 1)
+          : clamp(TR.wheelieThrottle + (target - this.pitch) * 2.6 - rateUp * 0.45, 0, 1);
       if (this.pitch > TR.loopOut) {
         this.crash('looped out');
         // Off the back: the rider slides off behind the bike.
@@ -562,6 +576,10 @@ export class BikeDynamics {
     // arcade surge pushes the bike along, so a boost is felt at any speed.
     const bl = this.pt.boostLevel;
     if (bl > 0 && this.rear.grounded && !this.crashed) force.addScaledVector(_hf, m * TUNING.boostPush * bl);
+    // Arcade wheelie cruise: while the button holds the balance, the throttle drives on.
+    if (arcade && wheelieBtn && this.rear.grounded && !this.front.grounded ) {
+      force.addScaledVector(_hf, m * TUNING.tricks.wheeliePush * this.wheelieThrottle * (1 - smoothstep(this.wheelieCap - 4, this.wheelieCap, av)));
+    }
 
     // --- Aero ---------------------------------------------------------------
     const vmag = this.vel.length();
@@ -664,7 +682,14 @@ export class BikeDynamics {
     _tmp.multiply(this.invInertia);
     _tmp.applyMatrix3(_m3);
     this.angVel.addScaledVector(_tmp, dt);
-    if (arcade && !this.crashed && !this.righting) this.turnAssist(dt, steerIn, av);
+    if (arcade && !this.crashed && !this.righting) {
+      this.turnAssist(dt, steerIn, av);
+      if (this.rear.grounded && !this.front.grounded && this.pitch > 0.12) this.wheelieControl(dt, steerIn, av, wheelieBtn);
+      else {
+        this.wYaw = this.angVel.dot(UP);
+        if (wheelieBtn && this.rear.grounded && this.pitch > 0.04) this.wheelieControl(dt, steerIn, av, true);
+      }
+    }
     const maxW = TUNING.body.maxAngularSpeed;
     if (this.angVel.lengthSq() > maxW * maxW) this.angVel.setLength(maxW);
     if (this.vel.lengthSq() > TUNING.body.maxSpeed ** 2) this.vel.setLength(TUNING.body.maxSpeed);
@@ -989,6 +1014,40 @@ export class BikeDynamics {
    * the velocity follows the heading, both at the centre of mass (no roll side effects). Fades
    * out at walking pace (direct steering) and while the rear is sliding (drifts stay drifts).
    */
+  /**
+   * Arcade: riding on the back wheel. With the front in the air the bars do nothing and one
+   * tyre gives no sideways balance, so a rider steers and balances a wheelie with body
+   * weight. This gives that a dependable feel: the angular velocity is split into yaw (about
+   * world up), pitch (about the horizontal left axis) and roll (about the bike's forward
+   * axis); yaw follows the steering, roll holds the lean the turn needs and, while the
+   * wheelie button is held, pitch is steered to the balance-point target (the Xtreme
+   * Motorbikes-style "grau"), so any bike rides the back wheel for as long as it is held.
+   */
+  private wheelieControl(dt: number, steerIn: number, av: number, balance: boolean) {
+    _lh.set(_hf.z, 0, -_hf.x);
+    _m3.set(UP.x, _lh.x, _fwd.x, UP.y, _lh.y, _fwd.y, UP.z, _lh.z, _fwd.z);
+    if (Math.abs(_m3.determinant()) < 0.05) return;
+    _m3.invert();
+    _rates.copy(this.angVel).applyMatrix3(_m3); // (yaw, nose-down pitch, roll) rates
+    const w = smoothstep(1, 4, av);
+    // Yaw rate capped so the sideways pull stays near 0.75 g at speed.
+    const yawT = -Math.sign(this.speed || 1) * steerIn * Math.min(TUNING.tricks.wheelieYaw, 7.5 / Math.max(av, 1));
+    // Rates are set outright (eased only through their targets): on one wheel the tyre
+    // forces would otherwise swamp the rider's input.
+    this.wYaw += (yawT * w - this.wYaw) * Math.min(1, 7 * dt);
+    _rates.x = this.wYaw;
+    const leanWant = Math.sign(steerIn) * Math.atan((av * Math.abs(yawT)) / TUNING.gravity);
+    _rates.z = clamp((leanWant - this.lean) * 4, -2, 2);
+    // A gentle bob keeps the balance point looking ridden rather than locked.
+    const tgt = this.wheelieTarget + 0.025 * Math.sin(this.time * 2.3) + 0.012 * Math.sin(this.time * 5.1);
+    if (balance) _rates.y = -clamp((tgt - this.pitch) * 3.2, -1.4, 1.6);
+    this.angVel.set(0, 0, 0).addScaledVector(UP, _rates.x).addScaledVector(_lh, _rates.y).addScaledVector(_fwd, _rates.z);
+    // Keep the travel direction with the heading.
+    _tmp.set(-_hf.z, 0, _hf.x);
+    const vLat = this.vel.dot(_tmp);
+    if (this.vel.x * _hf.x + this.vel.z * _hf.z > 0) this.vel.addScaledVector(_tmp, -vLat * Math.min(1, 4 * w * dt));
+  }
+
   private turnAssist(dt: number, steerIn: number, av: number) {
     const TA = TUNING.assist.turn;
     if (!this.front.grounded || !this.rear.grounded) return;
@@ -1047,7 +1106,7 @@ export class BikeDynamics {
   crash(cause: string) {
     if (this.crashed) return;
     // Going over backwards while holding the wheelie button is a loop-out, whatever touched first.
-    if (this.wheelieHold > 1 && this.pitch > 0.8) cause = 'looped out';
+    if (this.wheelieHold > 0.3 && this.pitch > 0.8) cause = 'looped out';
     this.crashed = true;
     this.crashTime = 0;
     this.crashCause = cause;

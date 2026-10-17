@@ -162,7 +162,7 @@ export class PostFX {
     let w = this.size.x, h = this.size.y;
     for (let i = 0; i < L.length; i++) {
       this.down.uniforms.texel.value.set(1 / w, 1 / h);
-      this.down.uniforms.threshold.value = i === 0 ? 1.0 : 0;
+      this.down.uniforms.threshold.value = i === 0 ? 1.35 : 0;
       this.pass(this.down, src, L[i], renderer);
       src = L[i].texture;
       w = L[i].width;

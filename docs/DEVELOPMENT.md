@@ -79,6 +79,14 @@ instead of exploding it.
 - [x] PWA: manifest, icons, generated precaching service worker, offline fallback, cache versioning.
 - [x] Cloudflare Pages config (`_headers`, `wrangler.toml`, docs).
 - [x] 59 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] Round 7: landscape-only on phones. The "rotate your phone" overlay is gone (with iOS rotation lock on it could
+      never clear). An upright phone draws the whole app rotated 90° into a landscape box (`ui/orient.ts`; touch, garage
+      orbit and layout rects go through `toLocal` / `localRect`); e2e `portrait.spec.ts`. Held wheelies ("grau"):
+      the button holds the balance point indefinitely, the stick sets the height, steering works on the back wheel
+      (`wheelieControl` splits angular velocity into yaw / pitch / roll so the three controls never fight); arcade
+      never loops out, Realistic can. Lab: `lab-grau`. Visuals: higher day sun (streets were in building shadow),
+      grey worn asphalt with repair patches and sealed cracks, 2048 shadow map on Medium over ±28 m, open-crown
+      trees, satin fork tubes, bloom threshold 1.35. Shots: `shot-look2.mjs` (disables the automatic quality drop).
 - [x] Round 6 (realism): bike bodywork lofted (`loftPanel` U-section fenders), number boards, battery case with ribs,
       fork guards, alloy swingarm, ring rotors, bar pad; rider gear seams cleaned (region majority vote + soft blend);
       façade normal maps from a relief layer; office fins, pilasters, sill courses, balconies; cars drawn only in view

@@ -10,6 +10,7 @@ import type { Texture, WebGLRenderer } from 'three';
 import type { Game } from '../game/game';
 import { BikeModel } from '../render/bikeModel';
 import { floorTexture } from '../render/textures';
+import { localRect, toLocal } from './orient';
 import { computeVehicleSpec } from '../vehicle/spec';
 import type { VehicleSpec } from '../vehicle/spec';
 import { estimate } from '../vehicle/stats';
@@ -109,7 +110,7 @@ export class Garage {
     const c = this.canvasEl;
     c.addEventListener('pointerdown', (e) => {
       if (!this.open) return;
-      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      this.pointers.set(e.pointerId, toLocal(e.clientX, e.clientY));
       this.orbit.auto = false;
       c.setPointerCapture(e.pointerId);
     });
@@ -119,15 +120,16 @@ export class Garage {
       if (this.pointers.size === 2) {
         const [a, b] = [...this.pointers.values()];
         const d0 = Math.hypot(a.x - b.x, a.y - b.y);
-        this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        this.pointers.set(e.pointerId, toLocal(e.clientX, e.clientY));
         const [a2, b2] = [...this.pointers.values()];
         const d1 = Math.hypot(a2.x - b2.x, a2.y - b2.y);
         this.orbit.dist = Math.max(1.6, Math.min(6, this.orbit.dist * (d0 / Math.max(1, d1))));
         return;
       }
-      this.orbit.yaw -= (e.clientX - prev.x) * 0.008;
-      this.orbit.pitch = Math.max(-0.1, Math.min(1.2, this.orbit.pitch + (e.clientY - prev.y) * 0.006));
-      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const q = toLocal(e.clientX, e.clientY);
+      this.orbit.yaw -= (q.x - prev.x) * 0.008;
+      this.orbit.pitch = Math.max(-0.1, Math.min(1.2, this.orbit.pitch + (q.y - prev.y) * 0.006));
+      this.pointers.set(e.pointerId, toLocal(e.clientX, e.clientY));
     });
     const up = (e: PointerEvent) => this.pointers.delete(e.pointerId);
     c.addEventListener('pointerup', up);
@@ -147,9 +149,9 @@ export class Garage {
     this.baseline = this.est;
     this.el.style.display = '';
     this.renderPanels();
-    this.resize(window.innerWidth, window.innerHeight);
+    this.resize(this.game.container.clientWidth, this.game.container.clientHeight);
     // Layout may settle a frame later (fonts, safe areas).
-    requestAnimationFrame(() => this.resize(window.innerWidth, window.innerHeight));
+    requestAnimationFrame(() => this.resize(this.game.container.clientWidth, this.game.container.clientHeight));
   }
 
   hide() {
@@ -172,8 +174,9 @@ export class Garage {
     this.fit = 1;
     const center = this.el.querySelector<HTMLElement>('.g-center');
     if (this.open && center && w > 0 && hgt > 0) {
-      const r = center.getBoundingClientRect();
-      const btns = center.querySelector<HTMLElement>('.btn-row')?.getBoundingClientRect();
+      const r = localRect(center);
+      const btnEl = center.querySelector<HTMLElement>('.btn-row');
+      const btns = btnEl ? localRect(btnEl) : undefined;
       // Free area: the centre column, minus a button row at its top (phones) or bottom.
       let top = r.top, bottom = r.bottom;
       if (btns && btns.height > 0) {
