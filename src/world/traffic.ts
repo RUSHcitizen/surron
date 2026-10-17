@@ -17,15 +17,14 @@ import {
   Quaternion, Vector3, BoxGeometry, CircleGeometry,
 } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { dirIndex, roadNetwork, signalHeads } from './layout';
+import { HW, dirIndex, roadNetwork, signalHeads } from './layout';
 import type { RoadNode, Signal } from './layout';
 import type { BoxCollider, CollisionWorld } from './collision';
 import { mulberry32 } from '../core/noise';
 import { meshSDF, roundBox, smin, ssub } from '../render/sdfMesh';
 
-/** Lane centre offset from the road centre line, and where junction curves start/end. */
+/** Lane centre offset from the road centre line (each node says where its turn curves start). */
 const LANE = 3;
-const TURN = 7.5;
 export const CAR = { length: 4.4, width: 1.86, height: 1.5 };
 const ACCEL = 2.6;
 const BRAKE = 7;
@@ -219,17 +218,17 @@ export class Traffic {
   private roadCurve(a: number, dx: number, dz: number): Curve {
     const A = this.roads[a], B = this.roads[this.next(a, dx, dz)];
     const rx = -dz * LANE, rz = dx * LANE; // right-hand side of travel
-    const ax = A.x + dx * TURN + rx, az = A.z + dz * TURN + rz, bx = B.x - dx * TURN + rx, bz = B.z - dz * TURN + rz;
+    const ax = A.x + dx * A.turn + rx, az = A.z + dz * A.turn + rz, bx = B.x - dx * B.turn + rx, bz = B.z - dz * B.turn + rz;
     return curve(ax, az, (ax + bx) / 2, (az + bz) / 2, bx, bz);
   }
 
   /** Junction curve at a node: in along d, out along e (a U-turn when e = -d). */
   private turnCurve(node: number, dx: number, dz: number, ex: number, ez: number): Curve {
-    const N = this.roads[node];
+    const N = this.roads[node], T = N.turn;
     const rdx = -dz * LANE, rdz = dx * LANE, rex = -ez * LANE, rez = ex * LANE;
-    const ax = N.x - dx * TURN + rdx, az = N.z - dz * TURN + rdz, bx = N.x + ex * TURN + rex, bz = N.z + ez * TURN + rez;
+    const ax = N.x - dx * T + rdx, az = N.z - dz * T + rdz, bx = N.x + ex * T + rex, bz = N.z + ez * T + rez;
     if (dx === ex && dz === ez) return curve(ax, az, (ax + bx) / 2, (az + bz) / 2, bx, bz);
-    if (dx === -ex && dz === -ez) return curve(ax, az, N.x + dx * TURN, N.z + dz * TURN, bx, bz);
+    if (dx === -ex && dz === -ez) return curve(ax, az, N.x + dx * T, N.z + dz * T, bx, bz);
     return curve(ax, az, N.x + rdx + rex, N.z + rdz + rez, bx, bz);
   }
 
@@ -256,7 +255,9 @@ export class Traffic {
     c.to = this.next(from, c.dx, c.dz);
     c.curve = this.roadCurve(from, c.dx, c.dz);
     const A = this.roads[from], B = this.roads[c.to];
-    c.limit = c.vmax * (inCity((A.x + B.x) / 2, (A.z + B.z) / 2) ? 1 : 1.45);
+    // Faster outside the city, fastest on the highway loop.
+    const highway = Math.max(Math.abs(A.x), Math.abs(A.z)) >= HW && Math.max(Math.abs(B.x), Math.abs(B.z)) >= HW;
+    c.limit = c.vmax * (highway ? 1.9 : inCity((A.x + B.x) / 2, (A.z + B.z) / 2) ? 1 : 1.45);
     this.planExit(c);
   }
 
@@ -299,6 +300,8 @@ export class Traffic {
 
   /** May car `c` share its junction with the cars already crossing it? */
   private compatible(c: Car, ci: number) {
+    // A bend or a road end: nothing can cross.
+    if (this.roads[c.to].nbr.filter((k) => k >= 0).length <= 2) return true;
     const set = this.junction.get(c.to);
     if (!set) return true;
     for (const oi of set) {
@@ -355,7 +358,8 @@ export class Traffic {
       // Target speed: the road's limit, slower through turns, braking for the turn ahead.
       const straight = c.ex === c.dx && c.ez === c.dz;
       const uturn = c.ex === -c.dx && c.ez === -c.dz;
-      const turnV = straight ? c.limit : uturn ? 4 : 6.5;
+      // Sweeping highway corners are taken briskly; junction turns slowly.
+      const turnV = straight ? c.limit : uturn ? 4 : this.roads[c.to].turn > 20 ? Math.min(c.limit, 16) : 6.5;
       let want = c.limit;
       if (c.phase === 'turn') want = turnV;
       else {
@@ -364,7 +368,8 @@ export class Traffic {
       }
       // Keep a gap to whatever is ahead in the lane (other cars, and the bike when close).
       c.blockedBy = -1;
-      const look = 6 + c.v * 1.5;
+      // Far enough ahead to pull up comfortably from this speed (highway speeds need room).
+      const look = 6 + c.v * 1.5 + (c.v * c.v) / 9;
       for (let oi = 0; oi < n && c.ghost <= 0; oi++) {
         if (oi === ci) continue;
         const o = this.cars[oi];

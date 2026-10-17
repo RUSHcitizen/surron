@@ -2,9 +2,11 @@
  * World layout: generates the whole map deterministically (no downloaded assets).
  * Produces collision data plus everything the renderer and gameplay need.
  *
- * Map (x east, z north), 800 m square:
+ * Map (x east, z north), 1600 m square:
  *   City grid (west), hub + garage (centre), test facilities (south),
- *   off-road hills with an MX track, stunt park and sand pit (north-east).
+ *   off-road hills with an MX track, stunt park and sand pit (north-east),
+ *   ring roads round the city, and an outer countryside of hills and forest circled by a
+ *   1.2 km highway loop with sweeping corners.
  */
 import { Heightfield, SURFACE_INDEX } from './collision';
 import type { BoxDef } from './collision';
@@ -62,7 +64,7 @@ export interface Decor {
   spectators: { x: number; z: number; yaw: number }[];
 }
 
-export const WORLD = { size: 800, cell: 2.5, half: 400 };
+export const WORLD = { size: 1600, cell: 2.5, half: 800 };
 
 // City grid
 export const CITY_X = [-370, -290, -210, -130, -50];
@@ -75,9 +77,15 @@ const DRAG_Z = -300;
 export const RING_S = -235;
 export const RING_N = 205;
 const EAST_X = 10;
+/** Highway loop: half-size of the square and the length of its curved corners. */
+export const HW = 600;
+const HW_TURN = 55;
+/** Where the countryside starts (Chebyshev distance from the centre). */
+const COUNTRY = 430;
 
-/** A junction or road end. `nbr`: neighbour node per direction +x, -x, +z, -z (-1 = none). */
-export interface RoadNode { x: number; z: number; nbr: number[]; signal: boolean }
+/** A junction or road end. `nbr`: neighbour node per direction +x, -x, +z, -z (-1 = none).
+ *  `turn`: how far before / after the node a turn curve starts (big for sweeping corners). */
+export interface RoadNode { x: number; z: number; nbr: number[]; signal: boolean; turn: number }
 /** A traffic-light head for traffic arriving at `node` travelling along (dx, dz). */
 export interface Signal { node: number; dx: number; dz: number; x: number; z: number }
 
@@ -87,10 +95,10 @@ export const dirIndex = (dx: number, dz: number) => (dx > 0 ? 0 : dx < 0 ? 1 : d
 export function roadNetwork(): RoadNode[] {
   const nodes: RoadNode[] = [];
   const at = new Map<string, number>();
-  const node = (x: number, z: number) => {
+  const node = (x: number, z: number, turn = 7.5) => {
     const k = `${x},${z}`;
     let i = at.get(k);
-    if (i === undefined) { i = nodes.length; nodes.push({ x, z, nbr: [-1, -1, -1, -1], signal: false }); at.set(k, i); }
+    if (i === undefined) { i = nodes.length; nodes.push({ x, z, nbr: [-1, -1, -1, -1], signal: false, turn }); at.set(k, i); }
     return i;
   };
   const link = (a: number, b: number) => {
@@ -106,6 +114,13 @@ export function roadNetwork(): RoadNode[] {
   for (const z of [RING_S, RING_N]) for (let i = 0; i + 1 < xs.length; i++) link(node(xs[i], z), node(xs[i + 1], z));
   link(node(EAST_X, RING_N), node(EAST_X, HUB_Z1));
   link(node(EAST_X, RING_S), node(EAST_X, HUB_Z0));
+  // Highway loop (sweeping corners) and the three roads out to it.
+  const c1 = node(-HW, -HW, HW_TURN), c2 = node(HW, -HW, HW_TURN), c3 = node(HW, HW, HW_TURN), c4 = node(-HW, HW, HW_TURN);
+  const jn = node(EAST_X, HW), js = node(CITY_X[0], -HW), jw = node(-HW, 0);
+  link(c1, js); link(js, c2); link(c2, c3); link(c4, jn); link(jn, c3); link(c4, jw); link(jw, c1);
+  link(node(EAST_X, RING_N), jn);
+  link(node(CITY_X[0], RING_S), js);
+  link(node(CITY_X[0], 0), jw);
   for (const n of nodes) n.signal = n.nbr.filter((k) => k >= 0).length >= 3;
   return nodes;
 }
@@ -126,13 +141,55 @@ export function signalHeads(nodes: RoadNode[]): Signal[] {
 }
 
 /** New roads outside the city (rectangles x0, x1, z0, z1), for surfaces and flattening. */
+const HS = HW - HW_TURN;
 const OUTER_ROADS: [number, number, number, number][] = [
   [CITY_X[0] - 6, EAST_X + 6, RING_S - 6, RING_S + 6],
   [CITY_X[0] - 6, EAST_X + 6, RING_N - 6, RING_N + 6],
   ...CITY_X.map((x) => [x - 6, x + 6, RING_S, -175] as [number, number, number, number]),
   ...CITY_X.map((x) => [x - 6, x + 6, 175, RING_N] as [number, number, number, number]),
+  // Connectors out to the highway.
+  [EAST_X - 6, EAST_X + 6, RING_N, HW],
+  [CITY_X[0] - 6, CITY_X[0] + 6, -HW, RING_S],
+  [-HW, CITY_X[0], -6, 6],
+  // Highway straights (the corners are curves, below).
+  [-HS, HS, -HW - 6, -HW + 6], [-HS, HS, HW - 6, HW + 6], [-HW - 6, -HW + 6, -HS, HS], [HW - 6, HW + 6, -HS, HS],
 ];
-const onOuterRoad = (x: number, z: number, pad = 0) => OUTER_ROADS.some(([x0, x1, z0, z1]) => inRect(x, z, x0, x1, z0, z1, pad));
+/** Highway corner centre-lines (quadratic curves through the corner point), sampled. */
+const HW_CORNERS: P2[][] = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sz]) => {
+  const cx = sx * HW, cz = sz * HW;
+  const a = { x: cx - sx * HW_TURN, z: cz }, b = { x: cx, z: cz - sz * HW_TURN };
+  const pts: P2[] = [];
+  for (let i = 0; i <= 24; i++) {
+    const t = i / 24, u = 1 - t;
+    pts.push({ x: u * u * a.x + 2 * u * t * cx + t * t * b.x, z: u * u * a.z + 2 * u * t * cz + t * t * b.z });
+  }
+  return pts;
+});
+/** Distance from a point to the nearest new road edge (0 on the road). */
+function outerRoadDist(x: number, z: number) {
+  // (Hot: runs for every terrain vertex, so plain arithmetic and early outs.)
+  let d2 = Infinity;
+  for (let i = 0; i < OUTER_ROADS.length; i++) {
+    const r = OUTER_ROADS[i];
+    const dx = x < r[0] ? r[0] - x : x > r[1] ? x - r[1] : 0, dz = z < r[2] ? r[2] - z : z > r[3] ? z - r[3] : 0;
+    const q = dx * dx + dz * dz;
+    if (q < d2) { d2 = q; if (q === 0) return 0; }
+  }
+  let d = Math.sqrt(d2);
+  for (let k = 0; k < HW_CORNERS.length; k++) {
+    const c = HW_CORNERS[k], p0 = c[0], p1 = c[c.length - 1];
+    if (Math.abs(x - (p0.x + p1.x) / 2) > HW_TURN + 40 || Math.abs(z - (p0.z + p1.z) / 2) > HW_TURN + 40) continue;
+    for (let i = 0; i + 1 < c.length; i++) {
+      const a = c[i], b = c[i + 1];
+      const vx = b.x - a.x, vz = b.z - a.z;
+      const t = Math.max(0, Math.min(1, ((x - a.x) * vx + (z - a.z) * vz) / (vx * vx + vz * vz)));
+      const ex = x - a.x - vx * t, ez = z - a.z - vz * t;
+      d = Math.min(d, Math.max(0, Math.sqrt(ex * ex + ez * ez) - 6));
+    }
+  }
+  return d;
+}
+const onOuterRoad = (x: number, z: number, pad = 0) => outerRoadDist(x, z) <= pad;
 const HUB = { x0: -40, x1: 75, z0: -60, z1: 60 };
 const HUB_Z0 = HUB.z0, HUB_Z1 = HUB.z1;
 const DRIFT = { x: 95, z: -185, r: 46 };
@@ -198,24 +255,29 @@ function rectBlend(x: number, z: number, x0: number, x1: number, z0: number, z1:
 }
 
 function baseHeight(x: number, z: number): number {
-  let h = 0;
+  // `base` is the smooth lie of the land, `detail` the bumps on it. Roads keep the base (so they
+  // climb gently with the countryside) and drop the detail.
+  let base = 0, detail = 0;
   // Off-road hills (north-east)
   const off = smoothstep(55, 95, x) * smoothstep(-140, -100, z);
-  if (off > 0) h += off * (fbm(x / 90, z / 90, 4) * 14 + 5 + fbm(x / 25 + 7, z / 25, 2) * 1.6);
+  if (off > 0) { base += off * 5; detail += off * (fbm(x / 90, z / 90, 4) * 14 + fbm(x / 25 + 7, z / 25, 2) * 1.6); }
   // Rolling park hills (north-west, north of the city)
   const park = smoothstep(195, 235, z) * (1 - smoothstep(30, 70, x));
-  if (park > 0) h += park * (fbm(x / 70 + 3, z / 70, 3) * 7 + 3);
+  if (park > 0) { base += park * 3; detail += park * fbm(x / 70 + 3, z / 70, 3) * 7; }
   // Lake basin
   const dl = Math.hypot(x - LAKE.x, z - LAKE.z);
-  if (dl < LAKE.r + 12) h -= 6.5 * (1 - smoothstep(LAKE.r * 0.72, LAKE.r + 10, dl));
-  // Map edge berm
+  if (dl < LAKE.r + 12) detail -= 6.5 * (1 - smoothstep(LAKE.r * 0.72, LAKE.r + 10, dl));
+  // Outer countryside: broad rolling hills, a little higher toward the edge.
   const e = Math.max(Math.abs(x), Math.abs(z));
-  if (e > 355) h += Math.pow((e - 355) / 45, 2) * 28;
+  const country = smoothstep(COUNTRY - 20, COUNTRY + 90, e);
+  if (country > 0) { base += country * (6 + fbm(x / 400 + 2, z / 400, 2) * 8); detail += country * (fbm(x / 140 + 9, z / 140, 4) * 16 + fbm(x / 30, z / 30 + 4, 2) * 1.2); }
+  // Map edge berm
+  if (e > WORLD.half - 45) base += Math.pow((e - (WORLD.half - 45)) / 45, 2) * 28;
   // Keep facilities flat, blending smoothly into the hills.
-  let flat = rectBlend(x, z, STUNT.x - STUNT.w / 2, STUNT.x + STUNT.w / 2, STUNT.z - STUNT.d / 2, STUNT.z + STUNT.d / 2, 30);
-  // The ring roads run level, easing into the hills either side.
-  if (h !== 0) for (const [x0, x1, z0, z1] of OUTER_ROADS) flat = Math.max(flat, rectBlend(x, z, x0 - 2, x1 + 2, z0 - 2, z1 + 2, 26));
-  return h * (1 - flat);
+  const stunt = rectBlend(x, z, STUNT.x - STUNT.w / 2, STUNT.x + STUNT.w / 2, STUNT.z - STUNT.d / 2, STUNT.z + STUNT.d / 2, 30);
+  // Roads outside the city run smooth, easing into the hills either side.
+  const road = base !== 0 || detail !== 0 ? 1 - smoothstep(2, 28, outerRoadDist(x, z)) : 0;
+  return (base * (1 - stunt) + detail * (1 - Math.max(stunt, road)));
 }
 
 export function generateWorld(seed = 7): WorldData {
@@ -253,6 +315,12 @@ export function generateWorld(seed = 7): WorldData {
   });
   const TRACK_HALF = 5;
 
+  const tb = { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity };
+  for (const p of track) {
+    tb.x0 = Math.min(tb.x0, p.x - TRACK_HALF - 12); tb.x1 = Math.max(tb.x1, p.x + TRACK_HALF + 12);
+    tb.z0 = Math.min(tb.z0, p.z - TRACK_HALF - 12); tb.z1 = Math.max(tb.z1, p.z + TRACK_HALF + 12);
+  }
+
   // --- Heights & surfaces ---------------------------------------------------
   for (let iz = 0; iz < n; iz++) {
     for (let ix = 0; ix < n; ix++) {
@@ -260,8 +328,8 @@ export function generateWorld(seed = 7): WorldData {
       let h = baseHeight(x, z);
       let surf: SurfaceId = 'grass';
       if (x > 55 && z > -110 && fbm(x / 30 + 11, z / 30, 2) > 0.18) surf = 'dirt';
-      // Track carving
-      if (x > 60 && z > 100) {
+      // Track carving (only near the track: the search below is over every track point)
+      if (x > tb.x0 && x < tb.x1 && z > tb.z0 && z < tb.z1) {
         let best = 1e9, bi = 0;
         for (let i = 0; i < track.length; i++) {
           const dx = x - track[i].x, dz = z - track[i].z;
@@ -512,6 +580,46 @@ export function generateWorld(seed = 7): WorldData {
     for (let z = RING_S + 9; z < -170; z += 9) markings.push({ x, z, w: 0.18, l: 4, yaw: 0, color: 0xf2d24b });
     for (let z = 175; z < RING_N - 8; z += 9) markings.push({ x, z, w: 0.18, l: 4, yaw: 0, color: 0xf2d24b });
   }
+  // Connectors and the highway: centre dashes, solid edge lines and lights on the straights,
+  // and dashes and edge lines that follow the curve through each corner.
+  const dashes = (x0: number, z0: number, x1: number, z1: number) => {
+    const L = Math.hypot(x1 - x0, z1 - z0), yaw = Math.atan2(x1 - x0, z1 - z0);
+    for (let d = 6; d < L - 6; d += 9) {
+      const x = x0 + ((x1 - x0) * d) / L, z = z0 + ((z1 - z0) * d) / L;
+      if (!nearNode(x, z)) markings.push({ x, z, w: 0.18, l: 4, yaw, color: 0xf2d24b });
+    }
+  };
+  dashes(EAST_X, RING_N, EAST_X, HW);
+  dashes(CITY_X[0], -HW, CITY_X[0], RING_S);
+  dashes(-HW, 0, CITY_X[0], 0);
+  const hwSides: [number, number, number, number][] = [[-HS, -HW, HS, -HW], [-HS, HW, HS, HW], [-HW, -HS, -HW, HS], [HW, -HS, HW, HS]];
+  for (const [x0, z0, x1, z1] of hwSides) {
+    dashes(x0, z0, x1, z1);
+    const L = Math.hypot(x1 - x0, z1 - z0), yaw = Math.atan2(x1 - x0, z1 - z0);
+    const nx = (z1 - z0) / L, nz = -(x1 - x0) / L;
+    for (const side of [-1, 1]) {
+      // Edge lines in 12 m pieces (each one follows the ground), broken at junctions.
+      for (let d = 0; d < L; d += 12) {
+        const x = x0 + ((x1 - x0) * (d + 6)) / L + nx * side * 5.4, z = z0 + ((z1 - z0) * (d + 6)) / L + nz * side * 5.4;
+        if (!roads.some((n) => n.turn < 20 && Math.hypot(n.x - x, n.z - z) < 14)) markings.push({ x, z, w: 0.16, l: 12.2, yaw, color: 0xf2f2f0 });
+      }
+    }
+    for (let d = 40; d < L; d += 80) {
+      const x = x0 + ((x1 - x0) * d) / L + nx * 6.6, z = z0 + ((z1 - z0) * d) / L + nz * 6.6;
+      if (nearNode(x, z)) continue;
+      lights.push({ x, z, yaw: Math.atan2(-nx, -nz) });
+      box({ kind: 'invisible', tag: 'pole', x, y: groundAt(x, z) + 3, z, sx: 0.3, sy: 6, sz: 0.3 });
+    }
+  }
+  for (const c of HW_CORNERS) {
+    for (let i = 0; i + 1 < c.length; i++) {
+      const a = c[i], b = c[i + 1];
+      const yaw = Math.atan2(b.x - a.x, b.z - a.z), L = Math.hypot(b.x - a.x, b.z - a.z);
+      const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2, nx = (b.z - a.z) / L, nz = -(b.x - a.x) / L;
+      if (i % 2 === 0) markings.push({ x: mx, z: mz, w: 0.18, l: Math.min(4, L), yaw, color: 0xf2d24b });
+      for (const side of [-1, 1]) markings.push({ x: mx + nx * side * 5.4, z: mz + nz * side * 5.4, w: 0.16, l: L + 0.3, yaw, color: 0xf2f2f0 });
+    }
+  }
   const signals = signalHeads(roads);
   for (const sg of signals) box({ kind: 'invisible', tag: 'pole', x: sg.x, y: 2.5, z: sg.z, sx: 0.3, sy: 5, sz: 0.3 });
 
@@ -602,15 +710,24 @@ export function generateWorld(seed = 7): WorldData {
 
   // --- Edge walls (invisible) -------------------------------------------------
   const H = WORLD.half - 2;
-  box({ kind: 'invisible', x: 0, y: 20, z: H, sx: 800, sy: 80, sz: 2 });
-  box({ kind: 'invisible', x: 0, y: 20, z: -H, sx: 800, sy: 80, sz: 2 });
-  box({ kind: 'invisible', x: H, y: 20, z: 0, sx: 2, sy: 80, sz: 800 });
-  box({ kind: 'invisible', x: -H, y: 20, z: 0, sx: 2, sy: 80, sz: 800 });
+  box({ kind: 'invisible', x: 0, y: 20, z: H, sx: WORLD.size, sy: 80, sz: 2 });
+  box({ kind: 'invisible', x: 0, y: 20, z: -H, sx: WORLD.size, sy: 80, sz: 2 });
+  box({ kind: 'invisible', x: H, y: 20, z: 0, sx: 2, sy: 80, sz: WORLD.size });
+  box({ kind: 'invisible', x: -H, y: 20, z: 0, sx: 2, sy: 80, sz: WORLD.size });
 
   // --- Vegetation & rocks ----------------------------------------------------
   const nearTrack = (x: number, z: number, r: number) => track.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < r * r);
-  for (let i = 0; i < 900 && trees.length < 520; i++) {
-    const x = -390 + rnd() * 780, z = -390 + rnd() * 780;
+  for (let i = 0; i < 5000 && trees.length < 1500; i++) {
+    const x = -790 + rnd() * 1580, z = -790 + rnd() * 1580;
+    const e = Math.max(Math.abs(x), Math.abs(z));
+    // Countryside: forests (clumped by noise) between open fields.
+    if (e > COUNTRY) {
+      if (onOuterRoad(x, z, 9)) continue;
+      if (fbm(x / 120 + 3, z / 120, 2) < 0.02) continue;
+      trees.push({ x, z, s: 0.8 + rnd() * 0.9, kind: rnd() < 0.7 ? 0 : 1 });
+      continue;
+    }
+    if (trees.length >= 900) continue;
     const offroad = x > 60 && z > -110;
     const park = z > 215 && x < 60;
     const south = z < -215 && Math.abs(z - DRAG_Z) > 20 && !(Math.hypot(x - DRIFT.x, z - DRIFT.z) < DRIFT.r + 6) && !inRect(x, z, HANDLING.x - HANDLING.w / 2, HANDLING.x + HANDLING.w / 2, HANDLING.z - HANDLING.d / 2, HANDLING.z + HANDLING.d / 2, 8);
@@ -646,6 +763,8 @@ export function generateWorld(seed = 7): WorldData {
    [STUNT.x - 20, STUNT.z - 18], [STUNT.x + 30, STUNT.z + 10], [STUNT.x - 25, STUNT.z + 30], // stunt park
    [SAND.x, SAND.z], [350, 80], [300, 240], [200, 300], [130, 330], [100, 240], [270, 140], // off-road
    [-120, 300], [-260, 280], [-20, 330], [60, 260], [-330, 330], [10, 180], [250, 20], [180, -60],
+   [-HW, -300], [-HW, 330], [HW, -200], [HW, 260], [-200, HW], [380, HW], [200, -HW], [-500, -HW], // highway
+   [-520, 120], [480, 480], [500, -470], [-470, 520], // countryside
   ].forEach(([x, z]) => addC(x, z));
 
   // --- Track checkpoints -------------------------------------------------------
@@ -763,6 +882,7 @@ export function generateWorld(seed = 7): WorldData {
     offroad: { x: 110, z: 0, yaw: Math.PI / 2 },
     sand: { x: SAND.x - SAND.r - 10, z: SAND.z, yaw: Math.PI / 2 },
     lake: { x: LAKE.x + LAKE.r + 14, z: LAKE.z, yaw: -Math.PI / 2 },
+    highway: { x: -300, z: -HW + 3, yaw: Math.PI / 2 },
   };
 
   return {

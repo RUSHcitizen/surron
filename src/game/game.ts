@@ -40,14 +40,14 @@ import { UI } from '../ui/ui';
 export type GameState = 'menu' | 'ride' | 'pause' | 'garage';
 
 const QUALITY: Record<Settings['quality'], Quality> = {
-  low: { shadows: false, shadowSize: 512, trees: 180, pixelRatio: 1, drawDistance: 260 },
-  medium: { shadows: true, shadowSize: 1024, trees: 340, pixelRatio: 1.5, drawDistance: 380 },
-  high: { shadows: true, shadowSize: 2048, trees: 520, pixelRatio: 2, drawDistance: 520 },
+  low: { shadows: false, shadowSize: 512, trees: 450, pixelRatio: 1, drawDistance: 260 },
+  medium: { shadows: true, shadowSize: 1024, trees: 900, pixelRatio: 1.5, drawDistance: 380 },
+  high: { shadows: true, shadowSize: 2048, trees: 1500, pixelRatio: 2, drawDistance: 520 },
 };
 
 const GRASS_MAX = 7000;
 const CITY_PEDS = 320;
-const CARS = 48;
+const CARS = 72;
 const _v = new Vector3(), _v2 = new Vector3(), _m = new Matrix4(), _gl = new Vector3(), _gr = new Vector3();
 
 export class Game {

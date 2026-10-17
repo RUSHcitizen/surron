@@ -51,7 +51,8 @@ describe('city traffic', () => {
     }
     expect(offRoad).toBe(0);
     expect(minGap).toBeGreaterThan(0.3);
-    expect(longest).toBeLessThan(25);
+    // (A red light plus a queue can be ~30 s; a gridlock would be minutes.)
+    expect(longest).toBeLessThan(45);
     expect(sumV / n).toBeGreaterThan(5);
     expect(redRuns / entries).toBeLessThan(0.01);
     expect(outside / n).toBeGreaterThan(0.2); // plenty of traffic outside the city too

@@ -8,18 +8,18 @@ it('map', () => {
   const N = 800, img = Buffer.alloc(N * N * 3);
   const col: Record<string, number[]> = { asphalt: [60, 60, 66], concrete: [150, 150, 150], dirt: [140, 100, 60], grass: [80, 130, 60], sand: [220, 200, 140], gravel: [120, 115, 110] };
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    const x = i - 400, z = 400 - j;
+    const x = (i - 400) * 2, z = (400 - j) * 2;
     const c = col[d.terrain.surfaceAt(x, z)] ?? [255, 0, 255];
     const h = d.terrain.heightAt(x, z);
-    const k = Math.max(0.5, Math.min(1.4, 1 + h / 40));
+    const k = Math.max(0.4, Math.min(1.5, 1 + h / 30));
     const o = (j * N + i) * 3;
     img[o] = Math.min(255, c[0] * k); img[o + 1] = Math.min(255, c[1] * k); img[o + 2] = Math.min(255, c[2] * k);
-    if (x % 100 === 0 || z % 100 === 0) { img[o] = 255; img[o + 1] = 255; img[o + 2] = 0; }
+    if (x % 200 === 0 || z % 200 === 0) { img[o] = 255; img[o + 1] = 255; img[o + 2] = 0; }
   }
   for (const b of d.boxes) {
     if (b.kind === 'invisible') continue;
-    for (let x = Math.round(b.x - b.sx / 2); x <= b.x + b.sx / 2; x++) for (let z = Math.round(b.z - b.sz / 2); z <= b.z + b.sz / 2; z++) {
-      const i = x + 400, j = 400 - z;
+    for (let x = Math.round(b.x - b.sx / 2); x <= b.x + b.sx / 2; x += 2) for (let z = Math.round(b.z - b.sz / 2); z <= b.z + b.sz / 2; z += 2) {
+      const i = Math.round(x / 2) + 400, j = 400 - Math.round(z / 2);
       if (i < 0 || j < 0 || i >= N || j >= N) continue;
       const o = (j * N + i) * 3; img[o] = 30; img[o + 1] = 20; img[o + 2] = 40;
     }
