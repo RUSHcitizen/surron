@@ -30,6 +30,7 @@ import { Scorer } from '../gameplay/scoring';
 import { CHALLENGES, ChallengeRun } from '../gameplay/challenges';
 import type { ChallengeDef } from '../gameplay/challenges';
 import { Pedestrians } from '../world/pedestrians';
+import { Traffic } from '../world/traffic';
 import { PostFX } from '../render/postfx';
 import type { PedStand } from '../world/pedestrians';
 import { SaveSystem } from '../save/save';
@@ -45,7 +46,8 @@ const QUALITY: Record<Settings['quality'], Quality> = {
 };
 
 const GRASS_MAX = 7000;
-const CITY_PEDS = 100;
+const CITY_PEDS = 320;
+const CARS = 30;
 const _v = new Vector3(), _v2 = new Vector3(), _m = new Matrix4(), _gl = new Vector3(), _gr = new Vector3();
 
 export class Game {
@@ -70,6 +72,7 @@ export class Game {
   marks: TireMarks;
   particles: Particles;
   peds: Pedestrians;
+  traffic: Traffic;
   grass: Grass;
   birds: Birds;
   private wet = { under: 0, splashed: false, dry: { x: 0, z: 0, yaw: 0, ok: false } };
@@ -90,6 +93,7 @@ export class Game {
   private distanceSaveTimer = 0;
   private launch = { armed: false, t: 0, done: false };
   private frameTimes: number[] = [];
+  private lastCarBump = -10;
   private collected = new Set<string>();
   quality: Quality = QUALITY.high;
   private contextLost = false;
@@ -130,6 +134,8 @@ export class Game {
     const ground = (x: number, z: number) => this.world.groundHeight(x, z, 1.5);
     this.peds = new Pedestrians(this.data.pedPaths, CITY_PEDS, ground);
     this.scene.add(this.peds.root);
+    this.traffic = new Traffic(this.world, CARS);
+    this.scene.add(this.traffic.root);
     // Spectator crowds, one per area so each can be skipped (update + draw) when far away.
     const areas = new Map<string, PedStand[]>();
     for (const st of this.data.decor.spectators) {
@@ -240,6 +246,7 @@ export class Game {
     const pedShare = !s.pedestrians ? 0 : s.quality === 'low' ? 0.35 : s.quality === 'medium' ? 0.65 : 1;
     this.peds.setCount(Math.round(CITY_PEDS * pedShare));
     for (const c of this.crowds) if (c.peds !== this.peds) c.peds.setCount(Math.ceil(c.peds.peds.length * pedShare));
+    this.traffic.setCount(!s.traffic ? 0 : Math.round(CARS * (s.quality === 'low' ? 0.5 : s.quality === 'medium' ? 0.8 : 1)));
     this.camera.far = Math.max(this.quality.drawDistance + 400, 950);
     this.view.cullDistance = this.quality.drawDistance;
     (this.scene.fog as Fog).far = this.quality.drawDistance;
@@ -513,6 +520,28 @@ export class Game {
     return this.dynPR;
   }
 
+  /** Horns, near misses and bumps with city traffic. */
+  private trafficEvents() {
+    const b = this.bike;
+    for (const e of this.traffic.events) {
+      const d = Math.hypot(e.x - b.pos.x, e.z - b.pos.z);
+      if (e.type === 'horn') this.audio.horn(1 / (1 + d / 12));
+      else if (e.type === 'nearMiss' && !b.crashed) {
+        this.scorer.bonus('Near miss', 150);
+        this.ui.toast('Near miss! +150');
+      }
+    }
+    this.traffic.events.length = 0;
+    if (b.carContact > 0) {
+      if (!b.crashed && this.time - this.lastCarBump > 2) {
+        this.lastCarBump = this.time;
+        this.ui.toast('Watch the traffic!');
+        this.audio.impact(Math.min(1, b.carContact / 10 + 0.3), 'bump', 'asphalt');
+      }
+      b.carContact = 0;
+    }
+  }
+
   private menuUpdate(dt: number) {
     // Idle bike with a slow orbiting camera behind the menu.
     this.bike.step(emptyInput());
@@ -559,6 +588,8 @@ export class Game {
       this.settings.camDistance = this.cam.distance;
     }
 
+    // Traffic moves first, so the physics steps see the cars where they are drawn.
+    this.traffic.update(dt, this.bike.pos.x, this.bike.pos.z, this.bike.vel.x, this.bike.vel.z);
     // --- Fixed-step physics ---
     this.acc += dt;
     let steps = 0;
@@ -587,11 +618,12 @@ export class Game {
       else if (e.type === 'crash') {
         this.audio.impact(1, 'crash');
         this.cam.bump(0.8);
-        const why = e.cause === 'looped out' ? 'Looped out! You held the wheelie too long. ' : e.cause === 'over the bars' ? 'Over the bars! ' : 'Crashed! ';
+        const why = e.cause === 'looped out' ? 'Looped out! You held the wheelie too long. ' : e.cause === 'over the bars' ? 'Over the bars! ' : e.cause === 'car' ? 'Hit by traffic! ' : 'Crashed! ';
         this.ui.toast(`${why}Press R / ⟲ to reset (auto in 3 s)`, 2800);
       }
     }
     this.bike.events.length = 0;
+    this.trafficEvents();
     if (this.bike.wantsReset) {
       this.bike.reset();
       this.cam.snap();

@@ -31,6 +31,8 @@ export interface Settings {
   leftHanded: boolean;
   rideMode: RideMode;
   pedestrians: boolean;
+  /** City traffic (cars to dodge). */
+  traffic: boolean;
   adaptiveResolution: boolean;
   /** 'arcade': crash only on 30+ mph impacts; 'realistic': full crash model. */
   crashes: 'arcade' | 'realistic';
@@ -62,7 +64,7 @@ export function defaultSettings(): Settings {
   return {
     master: 0.8, motor: 0.8, sfx: 0.8, ambience: 0.5, quality: touch ? 'medium' : 'high', assist: 0.85,
     camDistance: 4.2, camSensitivity: 1, steerSensitivity: 1, units: 'kmh', showTelemetry: true, showFps: false,
-    timeOfDay: 'day', drain: 'relaxed', touchControls: 'auto', leftHanded: false, rideMode: 'sport', pedestrians: true,
+    timeOfDay: 'day', drain: 'relaxed', touchControls: 'auto', leftHanded: false, rideMode: 'sport', pedestrians: true, traffic: true,
     adaptiveResolution: true, crashes: 'arcade',
   };
 }
@@ -100,7 +102,7 @@ export function migrate(raw: unknown): SaveData {
     showFps: s.showFps === true, timeOfDay: pick(s.timeOfDay, ['day', 'sunset', 'night'] as const, 'day'),
     drain: pick(s.drain, ['realistic', 'relaxed', 'off'] as const, ds.drain),
     touchControls: pick(s.touchControls, ['auto', 'on', 'off'] as const, 'auto'), leftHanded: s.leftHanded === true,
-    rideMode: (r.version ?? 1) < 3 && s.rideMode === 'standard' ? 'sport' : pick(s.rideMode, ['eco', 'standard', 'sport', 'hyper'] as const, 'sport'), pedestrians: s.pedestrians !== false,
+    rideMode: (r.version ?? 1) < 3 && s.rideMode === 'standard' ? 'sport' : pick(s.rideMode, ['eco', 'standard', 'sport', 'hyper'] as const, 'sport'), pedestrians: s.pedestrians !== false, traffic: s.traffic !== false,
     adaptiveResolution: s.adaptiveResolution !== false, crashes: pick(s.crashes, ['arcade', 'realistic'] as const, 'arcade'),
   };
   const builds = Array.isArray(r.builds) ? r.builds.slice(0, 60).map(sanitizeBuild) : d.builds;

@@ -76,6 +76,9 @@ const LIMBS = ['uarm', 'farm', 'hand', 'thigh', 'shin', 'shoe'];
 /** Near level of detail: at most this many people, within this distance of the bike (m). */
 const NEAR_MAX = 14;
 const NEAR_R = 22;
+/** People farther than this from the bike are not drawn (the fog hides them anyway), so a
+ *  big crowd costs only what is near; drawn people are packed into the first slots. */
+const VIS_R = 115;
 const _white = new Color(1, 1, 1);
 
 export class Pedestrians {
@@ -90,6 +93,8 @@ export class Pedestrians {
   private lodZ = Infinity;
   private aiTimer = 0;
   private active = Infinity;
+  /** Which person each simple-part slot was last coloured for (-1 = none). */
+  private slotOwner: Int32Array = new Int32Array(0);
   bumped = 0;
 
   constructor(paths: P2[][], count: number, private groundAt: (x: number, z: number) => number, stands: PedStand[] = [], seed = 42) {
@@ -171,6 +176,7 @@ export class Pedestrians {
       ['uarm', cap(0.06, L.uarm), mat, 2], ['farm', cap(0.05, L.farm), mat, 2], ['hand', new SphereGeometry(0.05, 12, 10), skinMat, 2],
       ['thigh', cap(0.088, L.thigh), mat, 2], ['shin', cap(0.066, L.shin), mat, 2], ['shoe', shoeG, mat, 2],
     ];
+    this.slotOwner = new Int32Array(n).fill(-1);
     const hiGeo = pedHiParts(L) as Partial<Record<Part, BufferGeometry>>;
     for (const [name, g, m, k] of defs) {
       const im = new InstancedMesh(g, m, n * k);
@@ -187,26 +193,6 @@ export class Pedestrians {
       this.hi[name] = hm;
       this.root.add(hm);
     }
-    // Per-person colours.
-    this.peds.forEach((p, i) => {
-      const L2 = p.look;
-      const P = this.parts;
-      P.torso.setColorAt(i, L2.shirt);
-      P.pelvis.setColorAt(i, L2.pants);
-      P.neck.setColorAt(i, L2.skin);
-      P.head.setColorAt(i, L2.skin);
-      P.hair.setColorAt(i, L2.hair);
-      P.hairBack.setColorAt(i, L2.hair);
-      for (let k = 0; k < 2; k++) {
-        const j = i * 2 + k;
-        P.uarm.setColorAt(j, L2.shirt);
-        P.farm.setColorAt(j, L2.shortSleeves ? L2.skin : L2.shirt);
-        P.hand.setColorAt(j, L2.skin);
-        P.thigh.setColorAt(j, L2.pants);
-        P.shin.setColorAt(j, L2.shorts ? L2.skin : L2.pants);
-        P.shoe.setColorAt(j, L2.shoes);
-      }
-    });
     // Place everyone once so they are correct even before the first update.
     for (const p of this.peds) {
       if (p.home) { p.x = p.home.x; p.z = p.home.z; p.heading = p.home.yaw; }
@@ -331,19 +317,28 @@ export class Pedestrians {
     const hip = [new Vector3(), new Vector3()], knee = new Vector3(), ankle = new Vector3(), sh = new Vector3(), el = new Vector3(), hand = new Vector3();
     const pelvis = new Vector3(), chest = new Vector3(), neckP = new Vector3(), headP = new Vector3();
     const n = Math.min(this.active, this.peds.length);
-    let near = 0;
+    const all = !Number.isFinite(this.lodX);
+    let near = 0, vis = 0;
     for (let i = 0; i < n; i++) {
       const p = this.peds[i];
       const lk = p.look, S = lk.scale, B = lk.build;
-      // The closest few get the sculpted parts; their simple slots are emptied.
-      const isNear = near < NEAR_MAX && (p.x - this.lodX) ** 2 + (p.z - this.lodZ) ** 2 < NEAR_R * NEAR_R;
-      let s0 = i;
+      const d2 = (p.x - this.lodX) ** 2 + (p.z - this.lodZ) ** 2;
+      if (!all && d2 > VIS_R * VIS_R) continue;
+      // The closest few get the sculpted parts; everyone else drawn takes the next simple slot.
+      const isNear = near < NEAR_MAX && d2 < NEAR_R * NEAR_R;
+      let s0: number;
       if (isNear) {
-        this.hideSimple(i);
         s0 = near++;
         this.P = this.hi;
         this.colorHi(s0, lk);
-      } else this.P = this.parts;
+      } else {
+        s0 = vis++;
+        this.P = this.parts;
+        if (this.slotOwner[s0] !== i) {
+          this.slotOwner[s0] = i;
+          this.colorSimple(s0, lk);
+        }
+      }
       const sit = p.state === 'sit', startled = p.state === 'startled';
       const w = sit ? 0 : p.walk;
       const jog = p.kind === 'jog' && !sit ? 1 : 0;
@@ -411,7 +406,14 @@ export class Pedestrians {
       }
     }
     this.P = this.parts;
-    for (const [k, m] of Object.entries(this.hi)) m.count = near * (LIMBS.includes(k) ? 2 : 1);
+    for (const [k, m] of Object.entries(this.hi)) {
+      m.count = near * (LIMBS.includes(k) ? 2 : 1);
+      m.visible = near > 0;
+    }
+    for (const [k, m] of Object.entries(this.parts)) {
+      m.count = vis * (LIMBS.includes(k) ? 2 : 1);
+      m.visible = vis > 0;
+    }
     for (const m of [...Object.values(this.parts), ...Object.values(this.hi)]) {
       m.instanceMatrix.needsUpdate = true;
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
@@ -427,14 +429,23 @@ export class Pedestrians {
     this.P[part].setMatrixAt(idx, _m);
   }
 
-  /** Empty a person's simple-part slots (they are drawn with the near set this frame). */
-  private hideSimple(i: number) {
-    _m.makeScale(0, 0, 0);
-    for (const [k, m] of Object.entries(this.parts)) {
-      if (LIMBS.includes(k)) {
-        m.setMatrixAt(i * 2, _m);
-        m.setMatrixAt(i * 2 + 1, _m);
-      } else m.setMatrixAt(i, _m);
+  /** Colour simple-part slot `i` for a person. */
+  private colorSimple(i: number, lk: Look) {
+    const P = this.parts;
+    P.torso.setColorAt(i, lk.shirt);
+    P.pelvis.setColorAt(i, lk.pants);
+    P.neck.setColorAt(i, lk.skin);
+    P.head.setColorAt(i, lk.skin);
+    P.hair.setColorAt(i, lk.hair);
+    P.hairBack.setColorAt(i, lk.hair);
+    for (let k = 0; k < 2; k++) {
+      const j = i * 2 + k;
+      P.uarm.setColorAt(j, lk.shirt);
+      P.farm.setColorAt(j, lk.shortSleeves ? lk.skin : lk.shirt);
+      P.hand.setColorAt(j, lk.skin);
+      P.thigh.setColorAt(j, lk.pants);
+      P.shin.setColorAt(j, lk.shorts ? lk.skin : lk.pants);
+      P.shoe.setColorAt(j, lk.shoes);
     }
   }
 
@@ -460,6 +471,5 @@ export class Pedestrians {
 
   setCount(n: number) {
     this.active = Math.min(n, this.peds.length);
-    for (const [k, m] of Object.entries(this.parts)) m.count = this.active * (LIMBS.includes(k) ? 2 : 1);
   }
 }

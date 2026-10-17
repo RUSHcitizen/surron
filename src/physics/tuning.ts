@@ -88,6 +88,11 @@ export const TUNING = {
     /** Lean "save": torque that stands the bike up once it leans past what the rider can hold. */
 /** Arcade: yaw torque per kg per rad of rear slip at speed. */
     arcadeYawStiffness: 15,
+    /** Arcade turning aid (see BikeDynamics.turnAssist): yaw-rate tracking (1/s), velocity
+     *  alignment with the heading (1/s), how much tighter than lean alone it turns, the
+     *  rider's body-lean roll-rate tracking (1/s), the faster flick (× maxRollRate) and how
+     *  much of the countersteer is left; the bars lead the lean by this fraction of the error. */
+    turn: { rate: 16, align: 3, boost: 1.3, roll: 30, rollRate: 1.6, counter: 0.3, lead: 0.4 },
         catchStiffness: 1400,
     catchDamping: 260,
     slideRollStiffness: 900,

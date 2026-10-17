@@ -141,6 +141,10 @@ export class BikeDynamics {
   private trickTorque = 0;
   /** Smoothed instinctive throttle roll-off (1 = none). */
   private thrTrim = 1;
+  /** Peak closing speed into a car this step (0 = no car contact); read by the game. */
+  carContact = 0;
+  /** Roll rate the rider is aiming for this step (rad/s). */
+  private rollRateT = 0;
   /** Arcade auto-right in progress, and how many times it has happened (telemetry/tests). */
   righting = false;
   rightings = 0;
@@ -461,16 +465,21 @@ export class BikeDynamics {
     const leanDirect = Math.atan((av * av * Math.tan(dDirectBase)) / (L * g));
     const leanT = clamp(lerp(steerIn * maxLean, leanDirect, wDirect), -maxLean - 0.1, maxLean + 0.1);
     this.leanTarget = leanT;
-    const dEq = clamp(Math.atan((L * g * Math.tan(clamp(this.lean, -1.3, 1.3))) / (vv * vv)), -sp.steering.maxSteer, sp.steering.maxSteer);
+    // Arcade: the bars lead the lean a little (steer for part of the lean still to come), so
+    // the bike starts turning the moment you steer rather than once it has leaned over.
+    const leanEq = arcade ? this.lean + (leanT - this.lean) * TUNING.assist.turn.lead * smoothstep(2.5, 6, av) : this.lean;
+    const dEq = clamp(Math.atan((L * g * Math.tan(clamp(leanEq, -1.3, 1.3))) / (vv * vv)), -sp.steering.maxSteer, sp.steering.maxSteer);
     const trailF = clamp(sp.steering.trail / 0.11, 0.6, 1.5);
     const gain = (sp.steering.leverage / (1 + av / 14)) * (1.15 - 0.15 * trailF);
     // Target a roll rate toward the desired lean (rate-limited like a real rider's flick),
     // and steer to produce it: this is countersteering.
     // Arcade: at very high speed the flick from one side to the other is calmer, so a
     // full-lock change of direction cannot snap the rear and throw the bike (a highside).
-    const maxRate = T.maxRollRate * sp.steering.leverage * (arcade ? lerp(1, 0.4, smoothstep(22, 55, av)) : 1);
+    const maxRate = T.maxRollRate * sp.steering.leverage * (arcade ? TUNING.assist.turn.rollRate * lerp(1, 0.4, smoothstep(22, 55, av)) : 1);
     const rateT = clamp((leanT - this.lean) * T.leanGain, -maxRate, maxRate);
-    const dFb = T.kd * (leanRate - rateT) * gain;
+    this.rollRateT = rateT;
+    // (Arcade: the rider's body does most of the leaning, so the countersteer is smaller.)
+    const dFb = T.kd * (leanRate - rateT) * gain * (arcade ? lerp(1, TUNING.assist.turn.counter, smoothstep(2.5, 6, av)) : 1);
     const dDirect = dDirectBase + dFb * 0.3;
     let cmd = lerp(dEq + dFb, dDirect, wDirect);
     // Direction of travel at the front axle relative to the bike's heading (+ = right).
@@ -579,6 +588,12 @@ export class BikeDynamics {
           torque.add(_tmp);
         }
         if (this.trickTorque) torque.addScaledVector(_left, this.trickTorque);
+        // Arcade: the rider's body starts the lean (instead of a long countersteer that first
+        // swings the bike the wrong way), so the bike tips into the turn as soon as you steer.
+        if (arcade && this.front.grounded && this.rear.grounded) {
+          const wr = smoothstep(2.5, 6, av) * (1 - smoothstep(0.06, 0.2, Math.abs(this.rear.slipAngle)));
+          torque.addScaledVector(_fwd, sp.inertia.z * TUNING.assist.turn.roll * wr * (this.rollRateT - leanRate));
+        }
         // Slide control: past ~20° of rear slip the rider's body-English and feel resist further
         // rotation, which makes drifts catchable. Below that, grip riding is untouched.
         const slideW = smoothstep(0.22, 0.75, Math.abs(this.rear.slipAngle)) * smoothstep(1.5, 5, av);
@@ -641,6 +656,7 @@ export class BikeDynamics {
     _tmp.multiply(this.invInertia);
     _tmp.applyMatrix3(_m3);
     this.angVel.addScaledVector(_tmp, dt);
+    if (arcade && !this.crashed && !this.righting) this.turnAssist(dt, steerIn, av);
     const maxW = TUNING.body.maxAngularSpeed;
     if (this.angVel.lengthSq() > maxW * maxW) this.angVel.setLength(maxW);
     if (this.vel.lengthSq() > TUNING.body.maxSpeed ** 2) this.vel.setLength(TUNING.body.maxSpeed);
@@ -906,7 +922,11 @@ export class BikeDynamics {
       if (depth <= 0) return;
       const n = this.hit2.normal;
       this.pointVelocity(p, _vp);
+      // Relative to the surface (a moving car pushes the bike along with it).
+      _vp.sub(this.hit2.vel);
       const vn = _vp.dot(n);
+      const car = this.hit2.tag === 'car';
+      if (car) this.carContact = Math.max(this.carContact, -vn, 0.01);
       const Fn = Math.max(0, B.contactStiffness * Math.min(depth, 0.25) - B.contactDamping * vn);
       _tmp.copy(_vp).addScaledVector(n, -vn);
       const vt = _tmp.length();
@@ -921,6 +941,8 @@ export class BikeDynamics {
         // The ground, ramps and glancing scrapes along a wall never crash.
         const C = TUNING.crash;
         if (n.y < 0.55 && this.stepSpeed >= C.arcadeSpeed && -vn >= Math.max(C.arcadeImpact, this.stepSpeed * 0.35)) crashHit = name;
+        // A car: what counts is the closing speed (it may be the car doing the hitting).
+        if (car && n.y < 0.55 && -vn >= C.arcadeSpeed) crashHit = 'car';
       } else if (crashProbe && depth > 0.012) {
         // Head-on speed into the surface counts fully; sliding along it (a bar end scraping a
         // wall) much less.
@@ -930,6 +952,7 @@ export class BikeDynamics {
         if (lying || impact > limit || depth > 0.12) crashHit = name;
       }
       // Front/rear tyre straight into a wall: a crash only above a speed that grows with assist.
+      if (this.crashRule === 'realistic' && car && -vn > 6) crashHit = 'car';
       if (this.crashRule === 'realistic' && !crashProbe && -vn > lerp(7, 11, this.assist) * sp.toughness && name.startsWith('tire')) crashHit = name;
       if (!crashProbe) scrape = Math.max(scrape, vt);
     };
@@ -947,6 +970,34 @@ export class BikeDynamics {
     if (scrape > 1 && touching) this.events.push({ type: 'scrape', strength: Math.min(1, scrape / 10) });
     this.bodyContact = touching ? this.bodyContact + dt : 0;
     if (crashHit && !this.crashed) this.crash(crashHit);
+  }
+
+  /**
+   * Arcade turning: the bike turns the way the bars point straight away, without a real
+   * bike's countersteer delay (a brief swing the wrong way, then an overshoot), and a little
+   * tighter than lean alone allows. Heading eases toward the yaw rate of the target lean and
+   * the velocity follows the heading, both at the centre of mass (no roll side effects). Fades
+   * out at walking pace (direct steering) and while the rear is sliding (drifts stay drifts).
+   */
+  private turnAssist(dt: number, steerIn: number, av: number) {
+    const TA = TUNING.assist.turn;
+    if (!this.front.grounded || !this.rear.grounded) return;
+    const w = smoothstep(2.5, 6, av) * (1 - smoothstep(0.1, 0.3, Math.abs(this.rear.slipAngle)));
+    if (w <= 0) return;
+    const boost = lerp(1, TA.boost, smoothstep(6, 16, av));
+    // Turning right (steer +) is a negative yaw rate about +Y.
+    const wantLean = Math.abs(steerIn) > 0.02 ? this.leanTarget : 0;
+    const yawT = -Math.sign(this.speed || 1) * (TUNING.gravity * Math.tan(clamp(wantLean, -1.1, 1.1)) / Math.max(av, 3)) * boost;
+    const yr = this.angVel.dot(UP);
+    // Only ever helps the turn along: rotating faster than the target (a slide being
+    // started) is left alone, the slide aids handle that.
+    const err = Math.sign(yr) === Math.sign(yawT) && Math.abs(yr) > Math.abs(yawT) ? 0 : yawT - yr;
+    this.angVel.addScaledVector(UP, err * Math.min(1, TA.rate * w * dt));
+    // Keep the travel direction with the heading (tighter than the tyres alone would hold).
+    _tmp.set(-_hf.z, 0, _hf.x); // horizontal right-hand normal
+    const vLat = this.vel.dot(_tmp);
+    const vF = this.vel.x * _hf.x + this.vel.z * _hf.z;
+    if (vF > 0) this.vel.addScaledVector(_tmp, -vLat * Math.min(1, TA.align * w * dt));
   }
 
   /**

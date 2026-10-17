@@ -8,7 +8,7 @@ A 3D browser game about building, tuning and riding lightweight **electric** dir
 Build a bike in the garage, take it to the city streets, the MX track or the test facilities, and feel what every change does
 to acceleration, grip, suspension, wheelies and drifts. No accounts, no servers, and it plays offline once installed.
 
-Electric only: no cars, no combustion engines, no gear shifting. All models, textures and sounds are procedurally
+Electric only: no combustion engines and no gear shifting; even the city traffic is electric cars. All models, textures and sounds are procedurally
 generated, so there are no downloaded asset packs.
 
 ## Run it
@@ -100,6 +100,9 @@ The service worker is only registered in production builds (`npm run build && np
   * Battery voltage sag and state of charge.
   * Coast and brake regen.
   * Motor thermal model with derating.
+  * Arcade turning (the default crash rule): the rider's body starts the lean and the bars lead it, so the bike turns
+    the moment you steer, without a real bike's brief countersteer swing the wrong way or the overshoot after it, and a
+    little tighter than lean alone allows. It steps aside while the rear is sliding, so drifts still work.
   * Smooth, strong drive: at full throttle (with rider assist) the rider keeps the front down instead of popping an
     accidental wheelie, a straight-line launch control holds the rear tyre near peak grip, and the rider's instinctive
     roll-offs are fed back in smoothly rather than switching the drive on and off.
@@ -122,7 +125,10 @@ The service worker is only registered in production builds (`npm run build && np
   * Dyno chart, saved builds, 2–3-way comparison, and JSON import/export.
 * **World** (800 m square): city grid with curbs, alleys, a parking lot and industrial yards; the hub with the garage; a drag strip
   with braking zone; drift pad; cone course; MX track with tabletops, berms and whoops; stunt park with kicker/landing pairs;
-  sand pit; off-road hills. Pedestrians on the sidewalks step aside (non-graphic contact), there are 30 collectible charge
+  sand pit; off-road hills. About 320 pedestrians walk the city sidewalks and step aside (non-graphic contact; only the people
+  near you are drawn). City traffic: 30 electric cars drive the street grid in the right-hand lane, turn at junctions, queue,
+  brake and honk for a bike in their lane, but not instantly, so you have to dodge them. A near miss scores +150, hitting
+  one at a 30+ mph closing speed is a crash (Settings → City traffic turns them off). There are 30 collectible charge
   cores that unlock cosmetic parts, and you can switch between day, sunset and night.
 * **Challenges with medals**: Drag Strip 201 m, Brake Test, Drift Pad, Stunt Park Jam, MX Track Lap, Cone Course, Long Jump.
 * **Scoring**: drifts, wheelies, stoppies, air, flips and spins, with combos, multipliers, clean-landing bonuses and busts on crashes.
@@ -190,7 +196,7 @@ npm run deploy        # = npm run build && npx wrangler deploy
 
 ## Tests
 
-* `npm test`: 54 Vitest tests.
+* `npm test`: 58 Vitest tests.
   * Physics scenarios:
     * settling and sag; acceleration and top speed; braking for every preset without flipping
     * turn equilibrium vs. tanφ = v²/(gR); right-steer → right-lean; low-speed U-turn; slaloms at 3 speeds
@@ -198,6 +204,8 @@ npm run deploy        # = npm run build && npx wrangler deploy
     * kicker jump landing; curb climbing; 40 s random-input fuzz (no NaN); crash/reset recovery
     * trick buttons: a short wheelie hold lifts the front safely, holding too long loops out, the stoppie button lifts the rear,
       and the wheelie button works at 50 km/h on every preset
+    * traffic: 5 minutes of city flow with no car-on-car contact or gridlock, cars braking for a bike in their lane,
+      30+ mph car hits crashing (including a car driving into a stopped bike) and slow bumps not
     * holding full throttle drives every preset forward cleanly: no accidental wheelie, no on/off throttle chatter
     * arcade crash rule: full-lock turning at any speed never crashes or lays the bike down; a wall hit below 30 mph is not a
       crash, above 30 mph head-on it is; Hyper mode passes 180 km/h

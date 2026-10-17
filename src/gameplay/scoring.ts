@@ -59,6 +59,11 @@ export class Scorer {
     this.live = null;
   }
 
+  /** A one-off bonus (e.g. a near miss with a car) added to the current chain. */
+  bonus(name: string, pts: number) {
+    this.addToChain(name, pts);
+  }
+
   private addToChain(name: string, pts: number) {
     const p = Math.round(pts);
     if (!this.tricksInChain.has(name)) {

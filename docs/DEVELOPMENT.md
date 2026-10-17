@@ -8,7 +8,7 @@ src/
              spec.ts (computeVehicleSpec: build → physics + geometry) · stats.ts (garage estimates, dyno)
   physics/   bike.ts (6-DOF dynamics, tires, suspension, rider controller, crashes) · powertrain.ts
              tuning.ts (ALL handling constants) · sim.ts (headless scenarios: tests + garage test bench)
-  world/     collision.ts (heightfield + OBBs, ray/sphere queries) · layout.ts (procedural map) · pedestrians.ts
+  world/     collision.ts (heightfield + OBBs + moving boxes, ray/sphere queries) · layout.ts (procedural map) · pedestrians.ts · traffic.ts
   render/    worldView.ts · bikeModel.ts (procedural bike) · rider.ts (skinned SDF rider + helmet, IK posing)
              sdfMesh.ts (SDF primitives + surface-nets mesher) · pedParts.ts (near-LOD pedestrian parts)
              postfx.ts (bloom, speed blur, grade) · effects.ts · textures.ts (canvas textures)
@@ -78,11 +78,15 @@ instead of exploding it.
 - [x] IndexedDB saves (versioned, migration, corruption-safe, fallbacks).
 - [x] PWA: manifest, icons, generated precaching service worker, offline fallback, cache versioning.
 - [x] Cloudflare Pages config (`_headers`, `wrangler.toml`, docs).
-- [x] 54 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] 58 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
 - [x] Round 4: skinned SDF rider (man in MX gear, sculpted helmets), arcade crash rule (only 30+ mph impacts or a
       looped-out wheelie; auto-righting), Hyper ride mode (up to ~230 km/h) with high-speed stability aids, wheelie/stoppie
       buttons that work at speed, spring-damped camera with a three-quarter trick view, post-processing (bloom, speed blur,
       grade, vignette), glass showroom, foliage shading, ground relief, near-LOD sculpted pedestrians.
+- [x] Round 4: arcade turning aid (body-led lean, bars lead the lean, yaw/heading help; measured turn-in ~0.3–0.5 s
+      with almost no wrong-way swing), faster touch/keyboard steering ramps, city traffic (`world/traffic.ts`: 30
+      instanced electric cars on a lane graph with junction reservations, moving colliders in `CollisionWorld`),
+      ~320 city pedestrians drawn only within 115 m. Labs: `tools/lab-steer`, `lab-traffic`, `shot-traffic.mjs`.
 - [x] Round 3: cooling/damper/pegs/handguard parts, rider tab (weight + gear), more paint; ~100 city pedestrians with
       joggers/idlers and spectator crowds (per-area culling, no crowd shadows); lake with water shader, cloud shadows,
       baked tree AO, birds, night window lights and lamp light pools, speed vignette. Medium at iPhone-15 size measured
@@ -113,6 +117,8 @@ instead of exploding it.
   - The most extreme build (22 kW "Monster" on dual-sport tires) can't do rear-brake-entry drifts reliably. That's
     intentional and listed in its cons, but it's harsh.
 - Pedestrians use simple loop paths; there are no crosswalk behaviours.
+- Traffic is limited to the city grid (one car crosses a junction at a time; no traffic lights). Cars are kinematic:
+  they push the bike but are never pushed or damaged themselves.
 - Touch steering is a virtual stick. There is no tilt (accelerometer) option yet.
 - Audio has only been verified to initialise without errors. I haven't listened to it on real hardware, so levels may need tuning.
 

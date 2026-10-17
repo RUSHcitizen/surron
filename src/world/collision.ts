@@ -13,10 +13,13 @@ export interface Hit {
   point: Vector3;
   normal: Vector3;
   surface: SurfaceId;
+  /** Velocity of the surface hit (moving boxes such as cars; zero for the static world). */
+  vel: Vector3;
+  tag?: string;
 }
 
 export function makeHit(): Hit {
-  return { t: 0, point: new Vector3(), normal: new Vector3(0, 1, 0), surface: 'asphalt' };
+  return { t: 0, point: new Vector3(), normal: new Vector3(0, 1, 0), surface: 'asphalt', vel: new Vector3() };
 }
 
 export interface BoxCollider {
@@ -32,6 +35,8 @@ export interface BoxCollider {
   tag?: string;
   /** Broadphase de-duplication stamp. */
   stamp: number;
+  /** Moving boxes only: velocity (m/s). */
+  vel?: Vector3;
 }
 
 export interface BoxDef {
@@ -98,6 +103,8 @@ const _n = new Vector3();
 
 export class CollisionWorld {
   boxes: BoxCollider[] = [];
+  /** Moving boxes (traffic): not in the grid, checked by distance; move them with setPose. */
+  dynamic: BoxCollider[] = [];
   private grid = new Map<number, BoxCollider[]>();
   private queryStamp = 0;
   /** Below this height the world is solid (safety floor). */
@@ -146,8 +153,33 @@ export class CollisionWorld {
     return box;
   }
 
+  /** A moving box (size sx, sy, sz); place it each frame with `setPose`. */
+  addDynamic(sx: number, sy: number, sz: number, tag: string, surface: SurfaceId = 'concrete'): BoxCollider {
+    const half = new Vector3(sx / 2, sy / 2, sz / 2);
+    const box: BoxCollider = { center: new Vector3(), half, rot: new Matrix3(), inv: new Matrix3(), surface, radius: half.length(), tag, stamp: 0, vel: new Vector3() };
+    this.dynamic.push(box);
+    return box;
+  }
+
+  /** Move a dynamic box: centre, heading (yaw about +Y) and velocity. */
+  setPose(b: BoxCollider, x: number, y: number, z: number, yaw: number, vx: number, vz: number) {
+    b.center.set(x, y, z);
+    const c = Math.cos(yaw), s = Math.sin(yaw);
+    b.rot.set(c, 0, s, 0, 1, 0, -s, 0, c);
+    b.inv.set(c, 0, -s, 0, 1, 0, s, 0, c);
+    b.vel!.set(vx, 0, vz);
+  }
+
   /** Visit boxes near the segment/sphere [a, b] expanded by `pad`. */
-  private forBoxes(ax: number, az: number, bx: number, bz: number, pad: number, fn: (b: BoxCollider) => void) {
+  private forBoxes(ax: number, az: number, bx: number, bz: number, pad: number, fn: (b: BoxCollider) => void, dynamic = true) {
+    if (dynamic) {
+      for (let i = 0; i < this.dynamic.length; i++) {
+        const b = this.dynamic[i];
+        const r = b.radius + pad;
+        if (b.center.x + r < Math.min(ax, bx) || b.center.x - r > Math.max(ax, bx) || b.center.z + r < Math.min(az, bz) || b.center.z - r > Math.max(az, bz)) continue;
+        fn(b);
+      }
+    }
     const stamp = ++this.queryStamp;
     const x0 = Math.floor((Math.min(ax, bx) - pad) / GRID), x1 = Math.floor((Math.max(ax, bx) + pad) / GRID);
     const z0 = Math.floor((Math.min(az, bz) - pad) / GRID), z1 = Math.floor((Math.max(az, bz) + pad) / GRID);
@@ -178,11 +210,14 @@ export class CollisionWorld {
 
   /**
    * Raycast against terrain and boxes. Rays that start inside a box ignore that box
-   * (the penetration query handles embedded points). Returns true on hit.
+   * (the penetration query handles embedded points). Returns true on hit. Callers that skip
+   * a tag (the camera, spawning) also skip moving boxes.
    */
   raycast(origin: Vector3, dir: Vector3, maxDist: number, out: Hit, ignoreInside = true, skipTag?: string): boolean {
     let best = maxDist;
     let found = false;
+    out.vel.set(0, 0, 0);
+    out.tag = undefined;
     // Terrain: march + bisection.
     const tr = this.terrain;
     const f = (t: number) => origin.y + dir.y * t - tr.heightAt(origin.x + dir.x * t, origin.z + dir.z * t);
@@ -262,8 +297,10 @@ export class CollisionWorld {
         if (axis === 0) _n.x = sign; else if (axis === 1) _n.y = sign; else _n.z = sign;
         out.normal.copy(_n).applyMatrix3(b.rot);
         out.surface = b.surface;
+        out.tag = b.tag;
+        if (b.vel) out.vel.copy(b.vel); else out.vel.set(0, 0, 0);
       }
-    });
+    }, !skipTag);
     return found;
   }
 
@@ -273,6 +310,8 @@ export class CollisionWorld {
    */
   penetration(p: Vector3, r: number, out: Hit): number {
     let depth = 0;
+    out.vel.set(0, 0, 0);
+    out.tag = undefined;
     const tr = this.terrain;
     const h = tr.heightAt(p.x, p.z);
     tr.normalAt(p.x, p.z, _n);
@@ -307,6 +346,8 @@ export class CollisionWorld {
       out.normal.copy(_p).applyMatrix3(b.rot);
       out.point.copy(_c).applyMatrix3(b.rot).add(b.center);
       out.surface = b.surface;
+      out.tag = b.tag;
+      if (b.vel) out.vel.copy(b.vel); else out.vel.set(0, 0, 0);
     });
     if (p.y - r < this.floor) {
       const d = this.floor - (p.y - r);

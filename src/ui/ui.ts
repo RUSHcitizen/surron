@@ -216,12 +216,13 @@ export class UI {
           segmented('Units', [{ id: 'kmh', name: 'km/h' }, { id: 'mph', name: 'mph' }] as const, s.units, (v) => set('units', v)),
           segmented('Time of day', [{ id: 'day', name: 'Day' }, { id: 'sunset', name: 'Sunset' }, { id: 'night', name: 'Night' }] as const, s.timeOfDay, (v) => set('timeOfDay', v)),
           toggle('Pedestrians', s.pedestrians, (v) => set('pedestrians', v)),
+          toggle('City traffic', s.traffic, (v) => set('traffic', v)),
           toggle('Telemetry overlay', s.showTelemetry, (v) => set('showTelemetry', v)),
         );
       } else if (t === 'graphics') {
         body.append(
           segmented('Quality', [{ id: 'low', name: 'Low' }, { id: 'medium', name: 'Medium' }, { id: 'high', name: 'High' }] as const, s.quality, (v) => set('quality', v)),
-          h('div', { class: 'note' }, 'Low: no shadows, 1× resolution, fewer particles & pedestrians — best for older phones. Tree density applies on next launch.'),
+          h('div', { class: 'note' }, 'Low: no shadows, 1× resolution, fewer particles, pedestrians & cars — best for older phones. Tree density applies on next launch.'),
           toggle('Adaptive resolution', s.adaptiveResolution, (v) => set('adaptiveResolution', v)),
           h('div', { class: 'note' }, 'Lowers the render resolution a little when frames get slow, and raises it again when there is headroom. Recommended on phones.'),
           toggle('Show FPS', s.showFps, (v) => set('showFps', v)),

@@ -118,8 +118,9 @@ export function brakeTest(spec: VehicleSpec, surface: SurfaceId = 'asphalt', spe
 }
 
 /** Steady-state turning: hold a steering input at a cruise speed; returns turn radius and peak lean. */
-export function turnTest(spec: VehicleSpec, speedKmh = 30, steer = 0.6, surface: SurfaceId = 'asphalt') {
+export function turnTest(spec: VehicleSpec, speedKmh = 30, steer = 0.6, surface: SurfaceId = 'asphalt', rule: 'arcade' | 'realistic' = 'arcade') {
   const bike = makeBike(spec, flatWorld(4000, surface), 'sport');
+  bike.crashRule = rule;
   settle(bike, 1);
   const target = speedKmh / 3.6;
   const cruise = (b: BikeDynamics) => Math.max(0, Math.min(1, (target - b.speed) * 0.6 + 0.12));

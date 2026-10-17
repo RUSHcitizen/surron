@@ -323,6 +323,30 @@ export class AudioEngine {
     });
   }
 
+  /** A car horn (two detuned square tones), quieter with distance. */
+  horn(volume = 1) {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== 'running' || volume <= 0.02) return;
+    const t = ctx.currentTime;
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 2200;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.07 * volume, t + 0.02);
+    g.gain.setValueAtTime(0.07 * volume, t + 0.38);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+    f.connect(g).connect(this.sfxBus);
+    for (const fr of [415, 523]) {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = fr;
+      o.connect(f);
+      o.start(t);
+      o.stop(t + 0.47);
+    }
+  }
+
   click() {
     const ctx = this.ctx;
     if (!ctx || ctx.state !== 'running') return;

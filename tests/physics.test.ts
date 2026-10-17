@@ -76,9 +76,9 @@ describe('acceleration, top speed and braking', () => {
 });
 
 describe('cornering', () => {
-  it('steady turns match the lean/radius equilibrium tanφ = v²/(gR)', () => {
+  it('steady turns match the lean/radius equilibrium tanφ = v²/(gR) (realistic rule: no arcade turning aid)', () => {
     for (const [kmh, steer] of [[20, 0.5], [40, 0.5], [40, 1], [60, 1]]) {
-      const t = turnTest(stock(), kmh, steer);
+      const t = turnTest(stock(), kmh, steer, 'asphalt', 'realistic');
       expect(t.crashed, `${kmh} ${steer}`).toBe(false);
       const theory = Math.atan((t.speed * t.speed) / (9.81 * t.radius));
       expect(Math.abs(deg(Math.abs(t.lean)) - deg(theory)), `${kmh} km/h steer ${steer}`).toBeLessThan(4);
