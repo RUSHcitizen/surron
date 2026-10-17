@@ -21,27 +21,40 @@ function gap(a: Traffic['cars'][number], b: Traffic['cars'][number]) {
 }
 
 describe('city traffic', () => {
-  it('flows around the grid for 5 minutes: on the roads, no collisions between cars, no gridlock', () => {
+  it('flows around the city and ring roads for 5 minutes: on the roads, obeying red lights, no collisions, no gridlock', () => {
     const d = generateWorld();
     const world = new CollisionWorld(d.terrain);
-    const tr = new Traffic(world, 30);
+    const tr = new Traffic(world, 48, d.roads, d.signals);
+    const phase = tr.cars.map((c) => c.phase);
+    let redRuns = 0, entries = 0, outside = 0;
     const dt = 1 / 30;
     const stopped = tr.cars.map(() => 0);
     let minGap = Infinity, longest = 0, offRoad = 0, sumV = 0, n = 0;
     for (let s = 0; s < 300 / dt; s++) {
       tr.update(dt, 9999, 9999, 0, 0);
       tr.cars.forEach((c, i) => {
+        if (phase[i] === 'road' && c.phase === 'turn') {
+          entries++;
+          // Entering on a light that has been red for a while (not an amber commit clearing).
+          const ax = c.dx !== 0 ? 0 : 1;
+          if (tr.light(c.to, ax) === 2 && tr.light(c.to, ax, tr.time - 1.5) === 2) redRuns++;
+        }
+        phase[i] = c.phase;
+        if (c.x > -35 || Math.abs(c.z) > 176) outside++;
         sumV += c.v; n++;
         stopped[i] = c.v < 0.3 ? stopped[i] + dt : 0;
         longest = Math.max(longest, stopped[i]);
-        if (d.terrain.surfaceAt(c.x, c.z) !== 'asphalt') offRoad++;
+        const sf = d.terrain.surfaceAt(c.x, c.z);
+        if (sf !== 'asphalt' && sf !== 'concrete') offRoad++;
         for (let j = i + 1; j < tr.cars.length; j++) if (Math.hypot(c.x - tr.cars[j].x, c.z - tr.cars[j].z) < 6) minGap = Math.min(minGap, gap(c, tr.cars[j]));
       });
     }
     expect(offRoad).toBe(0);
     expect(minGap).toBeGreaterThan(0.3);
     expect(longest).toBeLessThan(25);
-    expect(sumV / n).toBeGreaterThan(6);
+    expect(sumV / n).toBeGreaterThan(5);
+    expect(redRuns / entries).toBeLessThan(0.01);
+    expect(outside / n).toBeGreaterThan(0.2); // plenty of traffic outside the city too
   });
 
   it('a car brakes for a bike stopped in its lane', () => {

@@ -30,6 +30,9 @@ export interface WorldData {
   trees: { x: number; z: number; s: number; kind: number }[];
   rocks: { x: number; z: number; s: number }[];
   lights: { x: number; z: number; yaw: number }[];
+  /** Road graph the traffic drives, and the traffic-light heads (one per approach). */
+  roads: RoadNode[];
+  signals: Signal[];
   cones: P2[];
   pedPaths: P2[][];
   collectibles: { id: string; x: number; z: number }[];
@@ -68,7 +71,70 @@ const ROAD_HALF = 6;
 const SIDEWALK = 4;
 
 const DRAG_Z = -300;
+/** Ring roads south and north of the city, joined to the hub roads at x = 10. */
+export const RING_S = -235;
+export const RING_N = 205;
+const EAST_X = 10;
+
+/** A junction or road end. `nbr`: neighbour node per direction +x, -x, +z, -z (-1 = none). */
+export interface RoadNode { x: number; z: number; nbr: number[]; signal: boolean }
+/** A traffic-light head for traffic arriving at `node` travelling along (dx, dz). */
+export interface Signal { node: number; dx: number; dz: number; x: number; z: number }
+
+export const dirIndex = (dx: number, dz: number) => (dx > 0 ? 0 : dx < 0 ? 1 : dz > 0 ? 2 : 3);
+
+/** The drivable road graph: the city grid, its extensions to the ring roads, and the hub links. */
+export function roadNetwork(): RoadNode[] {
+  const nodes: RoadNode[] = [];
+  const at = new Map<string, number>();
+  const node = (x: number, z: number) => {
+    const k = `${x},${z}`;
+    let i = at.get(k);
+    if (i === undefined) { i = nodes.length; nodes.push({ x, z, nbr: [-1, -1, -1, -1], signal: false }); at.set(k, i); }
+    return i;
+  };
+  const link = (a: number, b: number) => {
+    const A = nodes[a], B = nodes[b];
+    const dx = Math.sign(B.x - A.x), dz = Math.sign(B.z - A.z);
+    A.nbr[dirIndex(dx, dz)] = b;
+    B.nbr[dirIndex(-dx, -dz)] = a;
+  };
+  const zs = [RING_S, ...CITY_Z, RING_N];
+  for (const x of CITY_X) for (let j = 0; j + 1 < zs.length; j++) link(node(x, zs[j]), node(x, zs[j + 1]));
+  for (const z of CITY_Z) for (let i = 0; i + 1 < CITY_X.length; i++) link(node(CITY_X[i], z), node(CITY_X[i + 1], z));
+  const xs = [...CITY_X, EAST_X];
+  for (const z of [RING_S, RING_N]) for (let i = 0; i + 1 < xs.length; i++) link(node(xs[i], z), node(xs[i + 1], z));
+  link(node(EAST_X, RING_N), node(EAST_X, HUB_Z1));
+  link(node(EAST_X, RING_S), node(EAST_X, HUB_Z0));
+  for (const n of nodes) n.signal = n.nbr.filter((k) => k >= 0).length >= 3;
+  return nodes;
+}
+
+/** Traffic-light heads: on the near-right corner of each approach to a signalled junction. */
+export function signalHeads(nodes: RoadNode[]): Signal[] {
+  const out: Signal[] = [];
+  const c = ROAD_HALF + 1.3;
+  nodes.forEach((n, i) => {
+    if (!n.signal) return;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      // Arriving along (dx, dz) means coming from the neighbour on the opposite side.
+      if (n.nbr[dirIndex(-dx, -dz)] < 0) continue;
+      out.push({ node: i, dx, dz, x: n.x - dx * c - dz * c, z: n.z - dz * c + dx * c });
+    }
+  });
+  return out;
+}
+
+/** New roads outside the city (rectangles x0, x1, z0, z1), for surfaces and flattening. */
+const OUTER_ROADS: [number, number, number, number][] = [
+  [CITY_X[0] - 6, EAST_X + 6, RING_S - 6, RING_S + 6],
+  [CITY_X[0] - 6, EAST_X + 6, RING_N - 6, RING_N + 6],
+  ...CITY_X.map((x) => [x - 6, x + 6, RING_S, -175] as [number, number, number, number]),
+  ...CITY_X.map((x) => [x - 6, x + 6, 175, RING_N] as [number, number, number, number]),
+];
+const onOuterRoad = (x: number, z: number, pad = 0) => OUTER_ROADS.some(([x0, x1, z0, z1]) => inRect(x, z, x0, x1, z0, z1, pad));
 const HUB = { x0: -40, x1: 75, z0: -60, z1: 60 };
+const HUB_Z0 = HUB.z0, HUB_Z1 = HUB.z1;
 const DRIFT = { x: 95, z: -185, r: 46 };
 const HANDLING = { x: 230, z: -185, w: 120, d: 74 };
 const STUNT = { x: 135, z: 70, w: 110, d: 90 };
@@ -146,7 +212,9 @@ function baseHeight(x: number, z: number): number {
   const e = Math.max(Math.abs(x), Math.abs(z));
   if (e > 355) h += Math.pow((e - 355) / 45, 2) * 28;
   // Keep facilities flat, blending smoothly into the hills.
-  const flat = rectBlend(x, z, STUNT.x - STUNT.w / 2, STUNT.x + STUNT.w / 2, STUNT.z - STUNT.d / 2, STUNT.z + STUNT.d / 2, 30);
+  let flat = rectBlend(x, z, STUNT.x - STUNT.w / 2, STUNT.x + STUNT.w / 2, STUNT.z - STUNT.d / 2, STUNT.z + STUNT.d / 2, 30);
+  // The ring roads run level, easing into the hills either side.
+  if (h !== 0) for (const [x0, x1, z0, z1] of OUTER_ROADS) flat = Math.max(flat, rectBlend(x, z, x0 - 2, x1 + 2, z0 - 2, z1 + 2, 26));
   return h * (1 - flat);
 }
 
@@ -227,6 +295,7 @@ export function generateWorld(seed = 7): WorldData {
       if (x >= -385 && x <= -35 && z >= -175 && z <= 175) surf = 'asphalt';
       // Hub plaza
       if (inRect(x, z, HUB.x0, HUB.x1, HUB.z0, HUB.z1)) surf = 'concrete';
+      if (onOuterRoad(x, z)) surf = 'asphalt';
       // Connecting roads
       if (Math.abs(x - 10) <= 6 && z <= HUB.z0 && z >= DRAG_Z) surf = 'asphalt'; // hub -> drag strip
       if (Math.abs(z) <= 6 && x >= HUB.x1 && x <= 110) surf = 'asphalt'; // hub -> off-road gate
@@ -426,6 +495,26 @@ export function generateWorld(seed = 7): WorldData {
   }
   for (const l of lights) box({ kind: 'invisible', tag: 'pole', x: l.x, y: 3, z: l.z, sx: 0.3, sy: 6, sz: 0.3 });
 
+  // Ring roads: centre lines and street lights; traffic-light poles at signalled junctions.
+  const roads = roadNetwork();
+  const nearNode = (x: number, z: number) => roads.some((n) => Math.abs(n.x - x) < 9 && Math.abs(n.z - z) < 9);
+  for (const z of [RING_S, RING_N]) {
+    for (let x = CITY_X[0]; x < EAST_X; x += 9) if (!nearNode(x, z)) markings.push({ x, z, w: 0.18, l: 4, yaw: Math.PI / 2, color: 0xf2d24b });
+    for (let x = CITY_X[0] + 20; x < EAST_X - 10; x += 40) {
+      const lx = z === RING_S ? x : x + 20;
+      if (nearNode(lx, z)) continue;
+      const lz = z + (z === RING_S ? -1 : 1) * (ROAD_HALF + 0.6);
+      lights.push({ x: lx, z: lz, yaw: z === RING_S ? 0 : Math.PI });
+      box({ kind: 'invisible', tag: 'pole', x: lx, y: 3, z: lz, sx: 0.3, sy: 6, sz: 0.3 });
+    }
+  }
+  for (const x of CITY_X) {
+    for (let z = RING_S + 9; z < -170; z += 9) markings.push({ x, z, w: 0.18, l: 4, yaw: 0, color: 0xf2d24b });
+    for (let z = 175; z < RING_N - 8; z += 9) markings.push({ x, z, w: 0.18, l: 4, yaw: 0, color: 0xf2d24b });
+  }
+  const signals = signalHeads(roads);
+  for (const sg of signals) box({ kind: 'invisible', tag: 'pole', x: sg.x, y: 2.5, z: sg.z, sx: 0.3, sy: 5, sz: 0.3 });
+
   // --- Hub ----------------------------------------------------------------
   // Showroom: light cladding, a glass front with mullions, a dark roof band with an accent
   // stripe and a cantilevered canopy over the entrance (visual only).
@@ -534,6 +623,7 @@ export function generateWorld(seed = 7): WorldData {
     if (Math.abs(z + 185) < 12 && x < 180) continue;
     if (Math.abs(x - 10) < 12 && z < 0) continue;
     if (nearTrack(x, z, 14)) continue;
+    if (onOuterRoad(x, z, 8)) continue;
     if (fbm(x / 50, z / 50, 2) < -0.05 && !park) continue;
     trees.push({ x, z, s: 0.7 + rnd() * 0.8, kind: rnd() < 0.6 ? 0 : 1 });
   }
@@ -676,7 +766,7 @@ export function generateWorld(seed = 7): WorldData {
   };
 
   return {
-    terrain: hf, boxes, markings, trees, rocks, lights, cones, pedPaths, collectibles, spawns,
+    terrain: hf, boxes, markings, trees, rocks, lights, cones, pedPaths, collectibles, spawns, roads, signals,
     track: { points: track, checkpoints, halfWidth: TRACK_HALF },
     drag, driftPad: DRIFT, handling: { x: HANDLING.x, z: HANDLING.z, gates }, stunt: STUNT, garagePad, labels, decor, lake,
   };

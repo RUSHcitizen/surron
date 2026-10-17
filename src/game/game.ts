@@ -47,7 +47,7 @@ const QUALITY: Record<Settings['quality'], Quality> = {
 
 const GRASS_MAX = 7000;
 const CITY_PEDS = 320;
-const CARS = 30;
+const CARS = 48;
 const _v = new Vector3(), _v2 = new Vector3(), _m = new Matrix4(), _gl = new Vector3(), _gr = new Vector3();
 
 export class Game {
@@ -134,7 +134,7 @@ export class Game {
     const ground = (x: number, z: number) => this.world.groundHeight(x, z, 1.5);
     this.peds = new Pedestrians(this.data.pedPaths, CITY_PEDS, ground);
     this.scene.add(this.peds.root);
-    this.traffic = new Traffic(this.world, CARS);
+    this.traffic = new Traffic(this.world, CARS, this.data.roads, this.data.signals);
     this.scene.add(this.traffic.root);
     // Spectator crowds, one per area so each can be skipped (update + draw) when far away.
     const areas = new Map<string, PedStand[]>();
