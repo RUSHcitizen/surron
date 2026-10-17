@@ -34,7 +34,7 @@ const bike = new BikeModel(build, spec);
 const pose = q.get('pose') ?? 'ride';
 bike.root.position.set(0, spec.front.radius + 0.35, 0);
 if (q.get('bike') !== '0') scene.add(bike.root);
-scene.add(bike.rider.root);
+if (q.get('rider') !== '0') scene.add(bike.rider.root);
 bike.root.updateMatrixWorld(true);
 const rider: RiderModel = bike.rider;
 if (q.get('white')) for (const c of rider.root.children) for (const m of ((c as Mesh).material as MeshStandardMaterial[])) { m.vertexColors = false; m.color.set(0xdddddd); }

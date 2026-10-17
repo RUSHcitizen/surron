@@ -146,7 +146,7 @@ export const PRESETS: BikeBuild[] = [
     b.rear = { diameter: 19, width: 120, profile: 80, tread: 'dualsport', compound: 'soft', pressure: 15 };
     Object.assign(b.tuning, { frontSprocket: 12, rearSprocket: 48, regen: 0.5, throttleMap: 'linear', tractionControl: true, wheelieControl: false });
     Object.assign(b.visual, { plasticColor: '#f4f5f7', accentColor: '#1b1d22', frameColor: '#1b1d22', decal: 'stripes', decalColor: '#1b1d22', number: '80', rimColor: '#1b1d22', finish: 'satin', forkColor: '#1b1d22' });
-    Object.assign(b.rider, { helmet: 'mx', helmetColor: '#1b1d22', helmetAccent: '#f4f5f7', jerseyColor: '#1b1d22', pantsColor: '#1b1d22', bootColor: '#f4f5f7' });
+    Object.assign(b.rider, { helmet: 'mx', helmetColor: '#f4f5f7', helmetAccent: '#1b1d22', jerseyColor: '#eceef0', pantsColor: '#1b1d22', bootColor: '#f4f5f7' });
   }),
   defaultBuild(),
   preset('mudlark', 'Varg MX', (b) => {

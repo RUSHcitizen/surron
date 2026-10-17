@@ -51,7 +51,8 @@ function twoBoneIK(a: Vector3, c: Vector3, l1: number, l2: number, hint: Vector3
 }
 
 // Elbows out and up (the MX attack position), knees forward.
-const armHint = (s: number, out: Vector3) => out.set(s * 0.8, 0.02, -0.5);
+// Elbows out and slightly down (attack position), not up at shoulder height.
+const armHint = (s: number, out: Vector3) => out.set(s * 0.75, -0.4, -0.45);
 const legHint = (s: number, out: Vector3) => out.set(s * 0.25, 0.3, 1);
 
 /** Torso rounding: the spine bows up/back between hip and neck, like a rider over the bars. */
@@ -188,7 +189,7 @@ function bodyPrims(j: Joints): Prim[] {
   // Pelvis and seat.
   P.push({ bone: B.pelvis, region: 'pants', k: 0, wr: 0.0015, d: oEllipsoid(j.hip.clone().addScaledVector(t, 0.03).addScaledVector(back, 0.01), X, t, front, [0.17, 0.14, 0.14]) });
   // Abdomen and chest: wider than deep, shoulders broad; the jersey hangs loose.
-  P.push({ bone: B.abdomen, region: 'jersey', k: 0.07, wr: 0.002, d: oEllipsoid(j.hip.clone().addScaledVector(t, 0.2).addScaledVector(back, 0.01), X, t, front, [0.165, 0.15, 0.13]) });
+  P.push({ bone: B.abdomen, region: 'jersey', k: 0.07, wr: 0.002, d: oEllipsoid(j.hip.clone().addScaledVector(t, 0.2).addScaledVector(back, 0.01), X, t, front, [0.148, 0.15, 0.122]) });
   const chestC = j.mid.clone().addScaledVector(t, 0.1).addScaledVector(back, -0.005);
   P.push({
     bone: B.chest, region: 'jersey', k: 0.08, wr: 0.0015, d: oEllipsoid(chestC, X, t, front, [0.198, 0.178, 0.142]),
@@ -210,21 +211,21 @@ function bodyPrims(j: Joints): Prim[] {
     const thigh = B[('thigh' + S) as BoneName], shin = B[('shin' + S) as BoneName], foot = B[('foot' + S) as BoneName];
     // Arms: deltoid, sleeve, forearm, fist around the grip.
     const ud = new Vector3().subVectors(j.el[i], j.sh[i]).normalize();
-    P.push({ bone: uarm, region: 'jersey', k: 0.05, wr: 0.002, d: sphere(j.sh[i].clone().addScaledVector(ud, 0.025), 0.064) });
-    P.push({ bone: uarm, region: 'jersey', k: 0.035, wr: 0.0028, d: cone(j.sh[i], j.el[i], 0.062, 0.051) });
+    P.push({ bone: uarm, region: 'jersey', k: 0.05, wr: 0.002, d: sphere(j.sh[i].clone().addScaledVector(ud, 0.028), 0.058) });
+    P.push({ bone: uarm, region: 'jersey', k: 0.035, wr: 0.0028, d: cone(j.sh[i], j.el[i], 0.055, 0.044) });
     const fd = new Vector3().subVectors(j.wr[i], j.el[i]).normalize();
     const cuffEnd = j.wr[i].clone().addScaledVector(fd, -0.06);
-    P.push({ bone: farm, region: 'jersey', k: 0.025, wr: 0.0025, d: cone(j.el[i], cuffEnd, 0.055, 0.046), t: along(j.el[i], cuffEnd) });
+    P.push({ bone: farm, region: 'jersey', k: 0.025, wr: 0.0025, d: cone(j.el[i], cuffEnd, 0.047, 0.038), t: along(j.el[i], cuffEnd) });
     const gx = new Vector3().copy(armHint(s, new Vector3())).addScaledVector(fd, -armHint(s, new Vector3()).dot(fd)).normalize();
     const gz = new Vector3().crossVectors(gx, fd);
-    P.push({ bone: farm, region: 'glove', k: 0.02, wr: 0.001, d: oEllipsoid(j.wr[i].clone().addScaledVector(fd, -0.005), gx, fd, gz, [0.045, 0.058, 0.05]), t: along(cuffEnd, j.wr[i]) });
+    P.push({ bone: farm, region: 'glove', k: 0.02, wr: 0.001, d: oEllipsoid(j.wr[i].clone().addScaledVector(fd, -0.005), gx, fd, gz, [0.046, 0.066, 0.052]), t: along(cuffEnd, j.wr[i]) });
     // Legs: thigh, knee guard, boot shaft, foot and sole.
     const thighT = along(j.hipS[i], j.kn[i]);
     P.push({
-      bone: thigh, region: 'pants', k: 0.06, wr: 0.003, d: cone(j.hipS[i], j.kn[i], 0.092, 0.068), t: along(j.hipS[i], j.kn[i]),
+      bone: thigh, region: 'pants', k: 0.06, wr: 0.003, d: cone(j.hipS[i], j.kn[i], 0.088, 0.064), t: along(j.hipS[i], j.kn[i]),
       side: (x, y, z) => {
         const u = Math.max(0, Math.min(1, thighT(x, y, z)));
-        return (s * (x - (j.hipS[i].x + (j.kn[i].x - j.hipS[i].x) * u))) / (0.092 - 0.024 * u);
+        return (s * (x - (j.hipS[i].x + (j.kn[i].x - j.hipS[i].x) * u))) / (0.088 - 0.024 * u);
       },
     });
     const kneeFront = new Vector3().copy(legHint(s, new Vector3()));
@@ -232,7 +233,7 @@ function bodyPrims(j: Joints): Prim[] {
     kneeFront.addScaledVector(sd, -kneeFront.dot(sd)).normalize();
     const kx = new Vector3().crossVectors(sd, kneeFront).normalize();
     P.push({ bone: shin, region: 'guard', k: 0.012, wr: 0, d: oEllipsoid(j.kn[i].clone().addScaledVector(kneeFront, 0.035).addScaledVector(sd, 0.05), kx, sd, kneeFront, [0.055, 0.11, 0.035]) });
-    P.push({ bone: shin, region: 'boot', k: 0.03, wr: 0.0012, d: cone(j.kn[i].clone().addScaledVector(sd, 0.02), j.an[i], 0.068, 0.07), t: along(j.kn[i], j.an[i]), side: (x) => s * (x - j.an[i].x) });
+    P.push({ bone: shin, region: 'boot', k: 0.03, wr: 0.0012, d: cone(j.kn[i].clone().addScaledVector(sd, 0.02), j.an[i], 0.066, 0.056), t: along(j.kn[i], j.an[i]), side: (x) => s * (x - j.an[i].x) });
     P.push({ bone: foot, region: 'boot', k: 0.035, wr: 0, d: cone(j.an[i].clone().add(new Vector3(0, -0.01, -0.03)), j.toe[i], 0.062, 0.042) });
     P.push({ bone: foot, region: 'sole', k: 0.012, wr: 0, d: bound((x, y, z) => roundBox(x - j.an[i].x, y - (j.an[i].y - 0.055), z - (j.an[i].z + 0.055), 0.048, 0.016, 0.135, 0.014), j.an[i].clone().add(new Vector3(0, -0.055, 0.055)), 0.15) });
   }
@@ -309,7 +310,7 @@ function buildBody(): RiderMesh {
     const side = bp!.side?.(x, y, z) ?? 0;
     if (r === 'jersey' && bp!.t && tt > 0.78) r = 'jerseyAcc'; // cuffs
     else if (r === 'glove' && tt < 0.32) r = 'gloveAcc'; // glove cuff
-    else if (r === 'pants' && bp!.side && side > 0.93 && tt > 0.15 && tt < 0.85) r = 'pantsAcc'; // outer leg stripe
+    else if (r === 'pants' && bp!.side && side > 0.965 && tt > 0.15 && tt < 0.85) r = 'pantsAcc'; // outer leg stripe
     else if (r === 'boot' && bp!.t) {
       if (tt < 0.3) r = 'pants';
       else if (side > 0.035 && [0.5, 0.66, 0.82].some((b) => Math.abs(tt - b) < 0.02)) r = 'buckle';
@@ -379,14 +380,14 @@ function buildHelmet(style: HelmetStyle) {
     const ly = y - 0.088, lz = z - 0.168;
     const py = ly * cp - lz * sp, pz = ly * sp + lz * cp;
     const taper = 1 - 0.25 * Math.max(0, pz / 0.09);
-    return roundBox(x, py, pz, (mx ? 0.11 : 0.1) * taper, 0.006, mx ? 0.09 : 0.07, 0.005);
+    return roundBox(x, py, pz, (mx ? 0.105 : 0.095) * taper, 0.01, mx ? 0.085 : 0.065, 0.008);
   };
   const sdf = (x: number, y: number, z: number) => {
     let d = smin(shell(x, y, z), chin(x, y, z), 0.05);
     if (!full) {
       d = ssub(d, eyePort(x, y, z), 0.012);
       d = smin(d, goggles(x, y, z), 0.008);
-      d = smin(d, peak(x, y, z), 0.02);
+      d = smin(d, peak(x, y, z), 0.035);
     }
     return d;
   };
@@ -402,7 +403,7 @@ function buildHelmet(style: HelmetStyle) {
     else if (full && z > 0.09 && Math.abs(y - 0.008) < 0.046 && Math.abs(x) < 0.1 && ds < 0.006) r = 'lens';
     else if (!full && Math.abs(y - 0.008) < 0.017 && z < 0.1 && ds < 0.004) r = 'strap';
     else if (y < -0.118 && z < 0.06) r = 'trim';
-    else if (dc < ds - 0.004 && !full) r = 'accent';
+    else if (dc < ds - 0.004 && !full && Math.abs(x) < 0.02) r = 'accent';
     else if (Math.abs(x) < 0.022 && y > 0.07) r = 'accent';
     else if (full && Math.abs(x) > 0.1 && y < -0.02 && y > -0.06) r = 'accent';
     regions[v] = HREGIONS.indexOf(r);
@@ -551,7 +552,7 @@ export class RiderModel {
     // Accent panels contrast with the main colour (dark on light gear, light on dark gear).
     const contrast = (c: Color, other: Color) => (Math.abs(lum(c) - lum(other)) > 0.18 ? other.clone() : lum(c) > 0.45 ? new Color(0x1b1d22) : new Color(0x8a9099));
     const colors: Record<Region, Color> = {
-      jersey, jerseyAcc: contrast(jersey, pants), pants, pantsAcc: contrast(pants, jersey), boot,
+      jersey, jerseyAcc: contrast(jersey, pants), pants, pantsAcc: pants.clone().lerp(lum(pants) > 0.45 ? new Color(0x1b1d22) : new Color(0x9aa0a8), 0.55), boot,
       buckle: boot.clone().lerp(new Color(0x9aa0a8), 0.5), sole: new Color(0x1a1b1e), glove, gloveAcc: jersey.clone(), guard: new Color(0x2a2d33),
       brace: new Color(0x1d1f23), skin: new Color(0xc08a68),
     };
@@ -565,7 +566,7 @@ export class RiderModel {
     }
     // Soften seams between gear pieces (vertex regions make a stair-stepped, speckled edge
     // otherwise, most visible where white meets black).
-    (col.array as Float32Array).set(smoothColors(base, this.data.geometry, 4));
+    (col.array as Float32Array).set(smoothColors(base, this.data.geometry, 1));
     col.needsUpdate = true;
     const fabric = new MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 });
     const plastic = new MeshPhysicalMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.05, clearcoat: 0.4, clearcoatRoughness: 0.3 });

@@ -79,6 +79,11 @@ instead of exploding it.
 - [x] PWA: manifest, icons, generated precaching service worker, offline fallback, cache versioning.
 - [x] Cloudflare Pages config (`_headers`, `wrangler.toml`, docs).
 - [x] 59 unit/scenario tests and 7 e2e tests passing, including an offline reload and the touch wheelie button.
+- [x] Round 9: moulded bodywork (`render/bodyShell.ts`): shrouds, tank cover, saddle running onto the tank, side panels
+      and tail as one SDF surface with per-vertex colours (race kit keeps the old panels); upper frame rails tucked under
+      it. Rider: slimmer arms, bigger fists, tapered waist, thigh and boots, elbows lower (`armHint`), crisper gear
+      seams (1 colour-smoothing pass), solid helmet peak, chin in shell colour; Varg kit now white jersey + helmet over
+      black pants (save v5 updates an untouched `my-varg`). Shots: `shot-rider.mjs` with `rider=0` / `bike=0`.
 - [x] Round 8: realism and features. Broadleaf trees are alpha-tested leaf cards (`leafTexture`, `broadleafCards`,
       alpha-to-coverage) over a shrunken dark core; façades weathered in the shader (`weathered`: contact shading at the
       street, grime, rain streaks, per-building tone; `aGround` attribute). Turning is coordinated: the arcade yaw target

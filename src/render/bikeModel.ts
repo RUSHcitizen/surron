@@ -14,6 +14,7 @@ import type { VehicleSpec, V3 } from '../vehicle/spec';
 import { BODY_KITS, COOLING, DAMPERS, FENDERS, FINISHES, HANDGUARDS, LIGHTS, PEGS, RIM_STYLES, byId } from '../vehicle/parts';
 import { liveryTexture, plateTexture, treadTexture } from './textures';
 import { RiderModel } from './rider';
+import { bodyShellGeometry } from './bodyShell';
 export { RiderModel };
 
 const v = (p: V3) => new Vector3(p.x, p.y, p.z);
@@ -275,7 +276,8 @@ export class BikeModel {
     };
     const P = (z: number, y: number) => new Vector3(0, y, z);
     for (const x of [0.075, -0.075]) {
-      tube([headTop, P(0.12, 0.47), P(-0.12, 0.41), P(-0.32, 0.38), P(-0.62, 0.37)], 0.018, frameM, x);
+      // Upper rails run under the moulded bodywork (only the head area shows), as on the Varg.
+      tube(kit.style === 'race' ? [headTop, P(0.12, 0.47), P(-0.12, 0.41), P(-0.32, 0.38), P(-0.62, 0.37)] : [headTop, P(0.2, 0.43), P(0.02, 0.36), P(-0.2, 0.32), P(-0.4, 0.31)], 0.018, frameM, x);
       tube([head, P(0.3, 0.12), P(0.16, -0.1), P(-0.02, -0.08), P(-0.03, 0.08), P(-0.18, 0.2), P(-0.42, 0.33)], 0.02, frameM, x);
     }
     const headTube = new Mesh(this.geo(new CylinderGeometry(0.032, 0.032, 0.22, 20)), frameM);
@@ -353,22 +355,16 @@ export class BikeModel {
     };
     const seatEnd = G.seat.z - G.seatLength / 2;
     const seatFront = G.seat.z + G.seatLength / 2;
+    const rearFenderLen = fend.style === 'short' ? 0.3 : 0.52;
+    const sy = G.seat.y;
     if (kit.style !== 'race') {
-      // One-piece side shroud wrapping the battery, rising toward the steering head.
-      // The shroud covers the top and front of the pack and stops halfway down its flanks.
-      const topF = Math.min(head.z - 0.02, z1 + 0.04);
-      const ym = y0 + (y1 - y0) * 0.42;
-      const shroud = roundedShape([
-        [topF, Math.max(y1 + 0.12, head.y + 0.03)],
-        [z1 + 0.045, (ym + y1) / 2 + 0.02],
-        [z1 + 0.01, ym - 0.03],
-        [(z0 + z1) / 2, ym - 0.005],
-        [z0 + 0.03, ym + 0.05],
-        [z0 - 0.03, y1 - 0.02],
-        [Math.max(seatFront - 0.06, z0 + 0.04), y1 + 0.03],
-        [(z1 + topF) / 2 - 0.04, y1 + 0.08],
-      ], 0.06);
-      addMesh(sideExtrude(shroud, panelW, 0.03, 12), livery);
+      // Moulded one-piece bodywork: shrouds, tank cover, saddle, side panels and tail as one
+      // smooth surface (see bodyShell.ts).
+      const shellM = this.mat(new MeshPhysicalMaterial({ vertexColors: true, roughness: fin.roughness, metalness: fin.metalness * 0.6, clearcoat: gloss, clearcoatRoughness: 0.1 }));
+      addMesh(bodyShellGeometry({
+        bat: G.battery, bs: G.batterySize, head: G.head, seat: G.seat, seatLength: G.seatLength, tail: rearFenderLen * 0.85,
+        plastic: V.plasticColor, seatColor: V.seatColor, stripe: V.accentColor,
+      }), shellM);
       if (kit.style === 'armor') {
         addMesh(sideExtrude(roundedShape([[z1 + 0.04, y0 - 0.02], [z1 - 0.02, y0 - 0.11], [z0 + 0.02, y0 - 0.12], [z0 - 0.02, y0 - 0.04]], 0.04), panelW * 0.8, 0.015), alloy);
       }
@@ -377,35 +373,16 @@ export class BikeModel {
       const bat = addMesh(sideExtrude(roundedShape([[z1, y1], [z1, y0], [z0, y0], [z0, y1]], 0.04), bs.x, 0.02), dark);
       bat.position.y = 0;
       addMesh(sideExtrude(roundedShape([[head.z - 0.03, head.y + 0.02], [z1, y1 - 0.04], [z0 + 0.04, y1 - 0.02], [seatFront - 0.05, y1 + 0.06], [z1 - 0.06, y1 + 0.08]], 0.05), panelW * 0.85, 0.025), livery);
-    }
-    // Wings flanking the head tube.
-    if (kit.style !== 'race') {
-      for (const sd of [1, -1]) {
-        const wing = addMesh(sideExtrude(roundedShape([[0.04, 0.12], [0.1, -0.08], [-0.08, -0.1], [-0.12, 0.06]], 0.035), 0.022, 0.008), accent);
-        wing.position.set(sd * (panelW / 2 + 0.005), Math.max(y1 + 0.02, 0.38), Math.min(head.z - 0.08, z1));
-        wing.rotation.set(0.15, sd * 0.18, 0);
-      }
-    }
-    // Seat: long padded saddle.
-    const sy = G.seat.y;
-    const seatShape = roundedShape([
-      [seatFront + 0.02, sy + 0.005], [seatFront - 0.1, sy + 0.05], [seatEnd + 0.02, sy + 0.055], [seatEnd - 0.03, sy + 0.035],
-      [seatEnd, sy - 0.035], [seatFront - 0.05, sy - 0.04],
-    ], 0.05);
-    addMesh(sideExtrude(seatShape, 0.21, 0.04, 14), seatM);
-    // Tail / rear fender blade sweeping back from under the seat.
-    const rearFenderLen = fend.style === 'short' ? 0.3 : 0.52;
-    // A moulded fender: U section, kicking up at the tail.
-    addMesh(loftPanel([
-      [seatEnd + 0.16, sy - 0.07], [seatEnd, sy - 0.035], [seatEnd - rearFenderLen * 0.55, sy + 0.005], [seatEnd - rearFenderLen, sy + 0.06],
-    ], (t) => 0.235 - t * 0.075, 0.045, 0.006), paint);
-    // Side number boards under the seat.
-    for (const sd of [1, -1]) {
-      const board = addMesh(sideExtrude(roundedShape([
-        [seatEnd + 0.24, sy - 0.03], [seatEnd + 0.17, sy - 0.17], [seatEnd - 0.06, sy - 0.12], [seatEnd - 0.1, sy - 0.035],
-      ], 0.03), 0.012, 0.004, 8), livery);
-      board.position.x = sd * 0.1;
-      board.rotation.y = sd * 0.06;
+      // Seat: long padded saddle.
+      const seatShape = roundedShape([
+        [seatFront + 0.02, sy + 0.005], [seatFront - 0.1, sy + 0.05], [seatEnd + 0.02, sy + 0.055], [seatEnd - 0.03, sy + 0.035],
+        [seatEnd, sy - 0.035], [seatFront - 0.05, sy - 0.04],
+      ], 0.05);
+      addMesh(sideExtrude(seatShape, 0.21, 0.04, 14), seatM);
+      // A moulded fender: U section, kicking up at the tail.
+      addMesh(loftPanel([
+        [seatEnd + 0.16, sy - 0.07], [seatEnd, sy - 0.035], [seatEnd - rearFenderLen * 0.55, sy + 0.005], [seatEnd - rearFenderLen, sy + 0.06],
+      ], (t) => 0.235 - t * 0.075, 0.045, 0.006), paint);
     }
     // Tail light
     const tail = addMesh(new CapsuleGeometry(0.014, 0.07, 4, 8), this.brakeLightMat);
@@ -671,7 +648,7 @@ export class BikeModel {
     this.swingarm.add(this.armScale);
     for (const s of [1, -1]) {
       // Cast-aluminium arm: deep at the pivot, tapering to the axle.
-      const arm = new Mesh(this.geo(sideExtrude(roundedShape([[0.05, 0.045], [0.04, -0.05], [-0.5, -0.034], [-1.02, -0.024], [-1.02, 0.024], [-0.5, 0.036]], 0.02), 0.036, 0.009, 6)), alloy);
+      const arm = new Mesh(this.geo(sideExtrude(roundedShape([[0.05, 0.045], [0.04, -0.05], [-0.5, -0.034], [-1.02, -0.024], [-1.02, 0.024], [-0.5, 0.036]], 0.02), 0.04, 0.015, 8)), alloy);
       arm.position.set(s * 0.085, 0, 0);
       arm.castShadow = true;
       this.armScale.add(arm);

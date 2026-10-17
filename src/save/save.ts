@@ -9,7 +9,7 @@ import { DEFAULT_BINDINGS } from '../input/input';
 import type { Bindings } from '../input/input';
 import type { DrainMode } from '../physics/powertrain';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 export type Quality = 'low' | 'medium' | 'high';
 export interface Settings {
@@ -119,6 +119,15 @@ export function migrate(raw: unknown): SaveData {
   // saves get it too and ride it next time (their own builds stay in the garage).
   const addedVarg = (r.version ?? 1) < 4 && !builds.some((b) => b.id === 'my-varg') && builds.length < 60;
   if (addedVarg) builds.unshift({ ...cloneBuild(PRESETS[0]), id: 'my-varg' });
+  // v5: the Varg's rider kit became a white jersey and helmet over black pants (an all-black
+  // kit read as one dark blob). Only updated if the player never changed it.
+  if ((r.version ?? 1) < 5) {
+    const old = { helmetColor: '#1b1d22', helmetAccent: '#f4f5f7', jerseyColor: '#1b1d22', pantsColor: '#1b1d22' };
+    for (const b of builds) {
+      if (b.id !== 'my-varg' || !b.rider) continue;
+      if (Object.entries(old).every(([k, v]) => (b.rider as unknown as Record<string, string>)[k] === v)) Object.assign(b.rider, { ...PRESETS[0].rider });
+    }
+  }
   const p = (r.progress ?? {}) as Record<string, any>;
   const medals: Record<string, MedalRecord> = {};
   if (p.medals && typeof p.medals === 'object') {
