@@ -228,6 +228,15 @@ export type SurfaceId = 'asphalt' | 'concrete' | 'dirt' | 'grass' | 'sand' | 'gr
 
 export const MOTORS: MotorPart[] = [
   {
+    // Modelled on the published Stark Varg MX figures: 80 hp (60 kW) peak and about 938 N·m at
+    // the rear wheel on stock gearing (12/48 with the 2.5:1 primary).
+    id: 'varg80', name: 'Varg 80 hp', mass: 9.0, peakTorque: 97, ratedPower: 60000, kv: 150,
+    primaryRatio: 2.5, efficiency: 0.93, thermalMass: 9000, cooling: 22, deratingStart: 120, maxTemp: 160, whine: 1.25,
+    desc: 'Factory Varg motor: 80 hp and instant torque.',
+    pros: ['Huge, instant torque', 'Revs out to a high top speed', 'Runs cool'],
+    cons: ['Breaks the rear loose easily', 'Needs the matching controller and pack'],
+  },
+  {
     id: 'pulse4', name: 'Pulse M4', mass: 5.2, peakTorque: 24, ratedPower: 4500, kv: 118,
     primaryRatio: 2.5, efficiency: 0.92, thermalMass: 4200, cooling: 9, deratingStart: 105, maxTemp: 140, whine: 1.15,
     desc: 'Compact trail motor. Smooth and efficient.',
@@ -266,6 +275,13 @@ export const MOTORS: MotorPart[] = [
 
 export const CONTROLLERS: ControllerPart[] = [
   {
+    id: 'vargctl', name: 'Varg Inverter', mass: 2.4, torqueFactor: 1.0, maxPower: 60000, rampRate: 9, regenMax: 0.6,
+    tractionControl: true, heat: 1.1, pwmTone: 1.3,
+    desc: 'Factory inverter with traction control and smooth power mapping.',
+    pros: ['Full 80 hp', 'Traction control', 'Strong regen'],
+    cons: ['Only makes sense with a big motor and pack'],
+  },
+  {
     id: 'stock60', name: 'Stock 60A', mass: 1.6, torqueFactor: 0.85, maxPower: 6500, rampRate: 4, regenMax: 0.25,
     tractionControl: false, heat: 1.0, pwmTone: 1.0,
     desc: 'Factory controller with gentle mapping.',
@@ -296,6 +312,13 @@ export const CONTROLLERS: ControllerPart[] = [
 ];
 
 export const BATTERIES: BatteryPart[] = [
+  {
+    id: 'varg72', name: 'Varg 7.2 kWh', mass: 58.0, voltage: 72, capacityWh: 7200, maxPower: 62000, resistance: 0.02,
+    heightOffset: 0, size: 1.3,
+    desc: 'Factory high-capacity pack and its structural housing (the frame is built around it).',
+    pros: ['Feeds 80 hp without sag', 'Long range'],
+    cons: ['Heaviest pack'],
+  },
   {
     id: 'lite60', name: 'Lite 60V 20Ah', mass: 7.0, voltage: 60, capacityWh: 1200, maxPower: 8000, resistance: 0.11,
     heightOffset: 0.02, size: 0.8,
@@ -398,6 +421,11 @@ export const PROFILES = [70, 80, 100] as const;
 
 export const FORKS: ForkPart[] = [
   {
+    id: 'mx310', name: 'Factory MX 310', mass: 8.0, travel: 0.31, length: 0.82, springRate: 10000, damping: 600, progression: 0.55,
+    inverted: true,
+    desc: 'Full-size 310 mm motocross fork.', pros: ['Swallows big jumps', 'Plush in the rough'], cons: ['Heavy', 'Tall'],
+  },
+  {
     id: 'stock', name: 'Stock Coil 200', mass: 6.0, travel: 0.2, length: 0.7, springRate: 10500, damping: 520, progression: 0.4,
     inverted: false,
     desc: 'Factory right-side-up fork.', pros: ['Plush', 'Balanced'], cons: ['Dives under hard braking'],
@@ -415,6 +443,10 @@ export const FORKS: ForkPart[] = [
 ];
 
 export const SHOCKS: ShockPart[] = [
+  {
+    id: 'mx310', name: 'Factory MX Shock 310', mass: 3.6, travel: 0.31, springRate: 12500, damping: 720, progression: 0.6, rideHeight: 0.04,
+    desc: 'Full-size motocross shock and linkage.', pros: ['Big-hit capable', 'Great rear traction'], cons: ['Tall seat'],
+  },
   {
     id: 'stock', name: 'Stock Shock 210', mass: 1.8, travel: 0.21, springRate: 12500, damping: 620, progression: 0.4, rideHeight: 0,
     desc: 'Factory coil-over.', pros: ['Balanced'], cons: [],

@@ -133,8 +133,9 @@ export class Powertrain {
 
     // Traction control: trim torque when the rear spins up.
     this.tcActive = false;
-    if (sp.tractionControl && i.rearGrounded && i.speed > 1 && i.rearSlip > 0.12 && target > 0) {
-      target *= Math.max(0.15, 1 - (i.rearSlip - 0.12) * 6);
+    // Holds the rear near the tyre's peak-grip slip (about 0.1), where it drives hardest.
+    if (sp.tractionControl && i.rearGrounded && i.speed > 1 && i.rearSlip > 0.09 && target > 0) {
+      target *= Math.max(0.15, 1 - (i.rearSlip - 0.09) * 7);
       this.tcActive = true;
       this.limiter = 'traction';
     }

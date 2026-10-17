@@ -198,7 +198,9 @@ export class TouchControls {
       const sx = dx / STICK_R, sy = dy / STICK_R;
       // Small dead zone, then a gentle curve for fine steering.
       const curve = (v: number, dz: number) => Math.sign(v) * Math.pow(Math.max(0, Math.abs(v) - dz) / (1 - dz), 1.3);
-      t.steer = curve(sx, 0.06);
+      // Steering: nearly linear and full lock well before the edge of the ring, so a modest
+      // thumb movement turns properly (no hunting for the rim at speed).
+      t.steer = Math.sign(sx) * Math.min(1, Math.pow(Math.max(0, Math.abs(sx) - 0.05) / 0.7, 1.1));
       // Lean needs a deliberate vertical push so hard steering doesn't trigger wheelies.
       t.lean = -curve(sy, 0.32);
     } else if (p.zone === 'cluster') {

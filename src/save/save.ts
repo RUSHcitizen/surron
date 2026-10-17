@@ -9,7 +9,7 @@ import { DEFAULT_BINDINGS } from '../input/input';
 import type { Bindings } from '../input/input';
 import type { DrainMode } from '../physics/powertrain';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export type Quality = 'low' | 'medium' | 'high';
 export interface Settings {
@@ -113,6 +113,10 @@ export function migrate(raw: unknown): SaveData {
     seen.add(b.id);
   }
   if (!builds.length) builds.push(...d.builds);
+  // v4 added the Stark Varg MX (the real bike's figures) as the first factory bike: older
+  // saves get it too and ride it next time (their own builds stay in the garage).
+  const addedVarg = (r.version ?? 1) < 4 && !builds.some((b) => b.id === 'my-varg') && builds.length < 60;
+  if (addedVarg) builds.unshift({ ...cloneBuild(PRESETS[0]), id: 'my-varg' });
   const p = (r.progress ?? {}) as Record<string, any>;
   const medals: Record<string, MedalRecord> = {};
   if (p.medals && typeof p.medals === 'object') {
@@ -137,7 +141,7 @@ export function migrate(raw: unknown): SaveData {
       if (Array.isArray(v) && v.every((c) => typeof c === 'string') && v.length) bindings[k] = v.slice(0, 3) as string[];
     }
   }
-  const selected = typeof r.selectedBuildId === 'string' && builds.some((b) => b.id === r.selectedBuildId) ? r.selectedBuildId : builds[0].id;
+  const selected = addedVarg ? 'my-varg' : typeof r.selectedBuildId === 'string' && builds.some((b) => b.id === r.selectedBuildId) ? r.selectedBuildId : builds[0].id;
   return {
     version: SAVE_VERSION,
     settings,

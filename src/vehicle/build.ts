@@ -137,6 +137,17 @@ function preset(id: string, name: string, mut: (b: BikeBuild) => void): BikeBuil
 
 /** Factory presets. Original designs; each one demonstrates a different handling character. */
 export const PRESETS: BikeBuild[] = [
+  // Modelled on the real Stark Varg MX: 80 hp, ~938 N·m at the rear wheel, 21/19 wheels,
+  // 310 mm travel, ~1480 mm wheelbase and about 118 kg ready to ride.
+  preset('varg', 'Stark Varg MX', (b) => {
+    Object.assign(b.parts, { motor: 'varg80', controller: 'vargctl', battery: 'varg72', fork: 'mx310', shock: 'mx310', swingarm: 'ext60', handlebar: 'mx', seat: 'mx', fenders: 'high', brakes: 'quad' });
+    // Dual-sport rubber (as on the road-legal Varg EX) so it grips on the city streets too.
+    b.front = { diameter: 21, width: 80, profile: 100, tread: 'dualsport', compound: 'soft', pressure: 16 };
+    b.rear = { diameter: 19, width: 120, profile: 80, tread: 'dualsport', compound: 'soft', pressure: 15 };
+    Object.assign(b.tuning, { frontSprocket: 12, rearSprocket: 48, regen: 0.5, throttleMap: 'linear', tractionControl: true, wheelieControl: false });
+    Object.assign(b.visual, { plasticColor: '#f4f5f7', accentColor: '#1b1d22', frameColor: '#1b1d22', decal: 'stripes', decalColor: '#1b1d22', number: '80', rimColor: '#1b1d22', finish: 'satin', forkColor: '#1b1d22' });
+    Object.assign(b.rider, { helmet: 'mx', helmetColor: '#1b1d22', helmetAccent: '#f4f5f7', jerseyColor: '#1b1d22', pantsColor: '#1b1d22', bootColor: '#f4f5f7' });
+  }),
   defaultBuild(),
   preset('mudlark', 'Varg MX', (b) => {
     Object.assign(b.parts, { motor: 'brick10', controller: 'trail90', battery: 'stock60', fork: 'enduro', shock: 'enduro', handlebar: 'mx', seat: 'mx', fenders: 'high', bodyKit: 'armor' });

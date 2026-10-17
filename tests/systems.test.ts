@@ -17,7 +17,8 @@ describe('vehicle spec', () => {
     for (const p of PRESETS) {
       const s = computeVehicleSpec(p);
       expect(s.mass - s.riderMass, p.name).toBeGreaterThan(50);
-      expect(s.mass - s.riderMass, p.name).toBeLessThan(100);
+      // (The real Stark Varg MX is about 118 kg ready to ride.)
+      expect(s.mass - s.riderMass, p.name).toBeLessThan(125);
       expect(s.wheelbase).toBeGreaterThan(1.1);
       expect(s.wheelbase).toBeLessThan(1.45);
       expect(s.steering.trail).toBeGreaterThan(0.06);
@@ -155,7 +156,10 @@ describe('save system', () => {
     expect(d.settings.quality).toBe('low');
     expect(d.progress.collected).toEqual(['core1']);
     expect(d.progress.medals.drag.medal).toBe('silver');
-    expect(d.selectedBuildId).toBe('scout');
+    // Their own build is kept; pre-v4 saves gain the Stark Varg MX and start on it.
+    expect(d.builds.some((b) => b.id === 'scout')).toBe(true);
+    expect(d.selectedBuildId).toBe('my-varg');
+    expect(migrate(JSON.parse(JSON.stringify(d))).selectedBuildId).toBe('my-varg');
   });
   it('round-trips through JSON', () => {
     const d = defaultSave();

@@ -91,8 +91,9 @@ export const TUNING = {
     /** Arcade turning aid (see BikeDynamics.turnAssist): yaw-rate tracking (1/s), velocity
      *  alignment with the heading (1/s), how much tighter than lean alone it turns, the
      *  rider's body-lean roll-rate tracking (1/s), the faster flick (× maxRollRate) and how
-     *  much of the countersteer is left; the bars lead the lean by this fraction of the error. */
-    turn: { rate: 16, align: 3, boost: 1.3, roll: 30, rollRate: 1.6, counter: 0.3, lead: 0.4 },
+     *  much of the countersteer is left; the bars lead the lean by this fraction of the error;
+     *  extra side grip of the tyres (arcade cornering). */
+    turn: { rate: 30, align: 4, boost: 2.2, roll: 30, rollRate: 2.1, counter: 0.3, lead: 0.7, grip: 1.3 },
         catchStiffness: 1400,
     catchDamping: 260,
     slideRollStiffness: 900,

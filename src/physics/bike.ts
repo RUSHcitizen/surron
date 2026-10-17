@@ -449,7 +449,7 @@ export class BikeDynamics {
     // --- Rider steering controller ----------------------------------------
     const T = TUNING.steering;
     const surfF = this.front.surface, surfR = this.rear.surface;
-    const mu = Math.min(sp.front.tire.mu[surfF], sp.rear.tire.mu[surfR]);
+    const mu = Math.min(sp.front.tire.mu[surfF], sp.rear.tire.mu[surfR]) * (arcade ? TUNING.assist.turn.grip : 1);
     let maxLean = lerp(T.lowSpeedLean, T.maxLean, smoothstep(T.leanRampStart, T.leanRampEnd, av));
     // Front washing out: the rider stands the bike up a little.
     maxLean *= 1 - 0.45 * this.assist * clamp(this.front.slide * 1.5, 0, 1);
@@ -845,6 +845,8 @@ export class BikeDynamics {
     const denomLong = Math.max(Math.abs(vLong), TT.lowSpeedLong);
     const sy = -vLat / Math.max(Math.abs(vLong), TT.lowSpeedLat) / tanPeak;
     const muN = mu * N;
+    // Arcade: extra cornering grip (side force only), so the bike holds tighter lines.
+    const latGrip = this.crashRule === 'arcade' ? TUNING.assist.turn.grip : 1;
 
     // Sub-stepped wheel spin with the longitudinal tire force.
     const n = TUNING.wheelSubsteps;
@@ -859,7 +861,7 @@ export class BikeDynamics {
       let shape = 0;
       if (s > 1e-6) shape = s <= 1 ? s * (2 - s) : slideR + (1 - slideR) * Math.exp(-TT.falloff * (s - 1));
       let fx = s > 1e-6 ? (muN * shape * sx) / s : 0;
-      const fy = s > 1e-6 ? (muN * shape * sy) / s : 0;
+      const fy = s > 1e-6 ? (muN * latGrip * shape * sy) / s : 0;
       // Brake / drive on the wheel.
       let bT = brakeT;
       if (ABS && sx < -0.9) bT *= 0.35;
