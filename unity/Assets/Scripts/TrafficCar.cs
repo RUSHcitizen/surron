@@ -34,22 +34,60 @@ namespace StarkVarg
             BuildBody();
         }
 
+        // --- Body: a sculpted signed-distance-field shell (see CarArt), glossy paint, tinted glass,
+        // lit head/tail lights, alloy wheels that roll with the car. ---
+        readonly Transform[] wheels = new Transform[4];
+        float wheelR = 0.34f;
+
         void BuildBody()
         {
-            var paints = new[] { "#e8e8ea", "#1b1d22", "#8a2f2f", "#2f4f8a", "#7a7f86", "#c6c9ce", "#2d5a3d" };
-            var paint = Mats.Get(Mats.Hex(paints[rnd.Next(paints.Length)]), 0.85f, 0.35f);
-            var glass = Mats.Get(Mats.Hex("#1d2530"), 0.95f, 0.5f);
-            var tyre = Mats.Get(Mats.Hex("#151515"), 0.1f);
-            var t = transform;
-            Shapes.Prim(PrimitiveType.Cube, t, new Vector3(0, 0.62f, 0), new Vector3(1.85f, 0.7f, 4.4f), paint);
-            Shapes.Prim(PrimitiveType.Cube, t, new Vector3(0, 1.18f, -0.25f), new Vector3(1.6f, 0.5f, 2.3f), glass);
-            Shapes.Prim(PrimitiveType.Cube, t, new Vector3(0, 0.95f, 2.05f), new Vector3(1.75f, 0.08f, 0.3f), Mats.Get(Color.white, 0.6f, 0f, Color.white * 0.6f));
-            foreach (float x in new[] { 0.82f, -0.82f })
-            foreach (float z in new[] { 1.4f, -1.4f })
-                Shapes.Prim(PrimitiveType.Cylinder, t, new Vector3(x, 0.34f, z), new Vector3(0.68f, 0.12f, 0.68f), tyre, false, Quaternion.Euler(0, 0, 90));
+            var paints = new[] { "#e8e8ea", "#1b1d22", "#8a2f2f", "#2f4f8a", "#7a7f86", "#c6c9ce", "#2d5a3d", "#f4f4f2", "#3b3f46" };
+            int kind = rnd.Next(CarArt.Kinds.Length);
+            var k = CarArt.Kinds[kind];
+            var paintCol = Mats.Hex(paints[rnd.Next(paints.Length)]);
+            var paint = Mats.Get(paintCol, 0.9f, 0.45f);
+            var glass = Mats.Get(Mats.Hex("#10161d"), 0.97f, 0.85f);
+            var head = Mats.Get(Mats.Hex("#e9eef5"), 0.95f, 0.2f, new Color(1.6f, 1.6f, 1.5f));
+            var tail = Mats.Get(Mats.Hex("#7a0a0a"), 0.9f, 0.1f, new Color(1.3f, 0.05f, 0.03f));
+            var trim = Mats.Get(Mats.Hex("#17181b"), 0.3f, 0f);
+            var tyre = Mats.Get(Mats.Hex("#141414"), 0.12f, 0f);
+            var alloy = Mats.Get(Mats.Hex("#b9bdc3"), 0.8f, 1f);
+
+            var body = new GameObject("Body");
+            body.transform.SetParent(transform, false);
+            body.AddComponent<MeshFilter>().sharedMesh = CarArt.Body(kind);
+            body.AddComponent<MeshRenderer>().sharedMaterials = new[] { paint, glass, head, tail, trim };
+
+            wheelR = k.wheelR;
+            var tyreMesh = CarArt.TyreMesh(k.wheelR);
+            var hubMesh = CarArt.HubMesh(k.wheelR);
+            int i = 0;
+            foreach (float z in new[] { k.wheelBase / 2f, -k.wheelBase / 2f })
+                foreach (float side in new[] { 1f, -1f })
+                {
+                    var w = new GameObject("Wheel").transform;
+                    w.SetParent(transform, false);
+                    w.localPosition = new Vector3(side * (k.width / 2f - 0.14f), k.wheelR, z);
+                    var ty = new GameObject("Tyre");
+                    ty.transform.SetParent(w, false);
+                    ty.AddComponent<MeshFilter>().sharedMesh = tyreMesh;
+                    ty.AddComponent<MeshRenderer>().sharedMaterial = tyre;
+                    var hb = new GameObject("Alloy");
+                    hb.transform.SetParent(w, false);
+                    hb.AddComponent<MeshFilter>().sharedMesh = hubMesh;
+                    hb.AddComponent<MeshRenderer>().sharedMaterial = alloy;
+                    wheels[i++] = w;
+                }
             var box = gameObject.AddComponent<BoxCollider>();
-            box.center = new Vector3(0, 0.8f, 0);
-            box.size = new Vector3(1.85f, 1.3f, 4.4f);
+            box.center = new Vector3(0, (k.roof + k.clear) / 2f, 0);
+            box.size = new Vector3(k.width, k.roof - k.clear, k.length);
+        }
+
+        void Update()
+        {
+            float spin = speed / wheelR * Time.deltaTime * Mathf.Rad2Deg;
+            foreach (var w in wheels)
+                if (w != null) w.localRotation *= Quaternion.Euler(spin, 0, 0);
         }
 
         void FixedUpdate()

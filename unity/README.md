@@ -38,10 +38,36 @@ run Unity. Expect a round of small fixes when you first open it, and report any 
   - right side: THROTTLE pad, BRAKE, WHEELIE, BOOST, JUMP and TRICK buttons;
   - RESET at the top right.
 
+## Graphics
+
+Everything is generated in code when Play starts. There are no art files to import.
+
+- **Sculpted models.** The bike bodywork, battery case, swingarm, rider (torso, helmet, arms,
+  legs, boots) and the cars are each one smooth surface. They are modelled as signed distance
+  fields and meshed at startup (`Sdf.cs`, `BikeArt.cs`, `CarArt.cs`). There are no boxy
+  primitives.
+- **PBR materials** use procedural albedo, normal and smoothness maps (`ProcTex.cs`) for:
+  - asphalt, concrete pavements and grass;
+  - brick, plaster, concrete and glass facades with recessed windows;
+  - tyre tread and riding-kit fabric.
+- **Lighting:**
+  - a warm sun with soft, very-high-resolution cascaded shadows;
+  - a procedural sky with a sun disc, which also supplies the ambient light;
+  - a realtime reflection probe that follows the bike, so car paint and glass reflect the
+    street;
+  - exponential fog;
+  - MSAA and HDR.
+- **Post-processing** (`PostFx.cs` + `Resources/Shaders/StarkVargPost.shader`): bloom, ACES
+  filmic tonemapping, a light colour grade and a vignette. Phones get lighter settings
+  automatically (2 shadow cascades, 2× MSAA, a smaller probe).
+- **Project settings.** `Assets/Editor/StarkVargProjectSetup.cs` switches the project to
+  **Linear** colour space (needed for correct PBR) and landscape-only the first time it opens.
+  Unity re-imports for a minute when this happens; that is normal.
+- **Startup cost.** Building the meshes takes about 1–2 s on a Mac, and longer on a phone.
+
 ## Make it look like the real thing
 
-The bike and rider in this port are simple placeholders built from Unity primitives. The real
-visual jump in Unity comes from imported assets:
+The procedural bike and rider can be swapped for imported assets:
 
 - **Your own bike or rider model.** Put a prefab named `BikeModel` and/or `RiderModel` in
   `Assets/Resources/`, and it replaces the placeholder automatically.
@@ -56,7 +82,8 @@ visual jump in Unity comes from imported assets:
   2. Create a URP asset (Assets → Create → Rendering → URP Asset (with Universal Renderer)).
   3. Assign it in Project Settings → Graphics and Quality.
   4. Materials made by the scripts switch to URP/Lit automatically.
-  5. Add a **Volume** with Bloom, Tonemapping (ACES) and Color Adjustments.
+  5. Add a **Volume** with Bloom, Tonemapping (ACES) and Color Adjustments (`PostFx` only
+     works in the built-in pipeline and switches itself off under URP).
 - **Real city assets** can replace `CityGenerator`, for example a modular city pack placed in
   your own scene. The bike works in any scene that has colliders on the ground and the
   buildings.
@@ -82,10 +109,14 @@ Keep textures small, and use the "Brotli" compression with the matching Cloudfla
 | --- | --- |
 | `GameBootstrap.cs` | Builds the light, fog, city, traffic, bike, camera and HUD when Play starts. Skips itself if the scene already has a `BikeController`. |
 | `BikeController.cs` | Arcade physics (Rigidbody): traction then power-limited acceleration, coordinated lean and yaw, held wheelies, boost, crashes only on hits over 30 mph. Tricks: charged bunny hop, air whip (it straightens before touchdown), flips, Superman / Can-Can / No-Hander poses, and trick naming and scoring on landing. |
-| `BikeVisual.cs` | Lean, wheelie pitch about the rear axle, steering and wheel spin, plus the placeholder bike and rider (or your prefabs). |
+| `BikeVisual.cs` | Lean, wheelie pitch about the rear axle, steering and wheel spin; assembles the procedural bike and rider (or your prefabs). |
+| `BikeArt.cs`, `CarArt.cs` | Sculpted bike, rider and car meshes (SDF shapes). |
+| `Sdf.cs`, `MeshGen.cs` | Surface-nets SDF mesher; tubes, tyres, discs, world-UV boxes. |
+| `ProcTex.cs` | Procedural PBR texture sets. |
+| `PostFx.cs`, `EnvProbe.cs` | Bloom / ACES / grade / vignette; following reflection probe. |
 | `BikeInput.cs` | Keyboard, gamepad and multi-touch, for both the new Input System and the legacy Input Manager. |
-| `CityGenerator.cs` | Street grid with markings, kerbs, buildings with window bands, trees, lamps, and static batching. |
-| `TrafficCar.cs` | Lane-keeping electric cars that turn at junctions and brake for whatever is ahead. |
+| `CityGenerator.cs` | Street grid with PBR asphalt, markings and granite kerbs; facade-textured buildings with roofs, shopfronts and awnings; leaf-card trees; lamps; static batching. |
+| `TrafficCar.cs` | Lane-keeping electric cars (three sculpted body styles, rolling alloy wheels) that turn at junctions and brake for whatever is ahead. |
 | `ChaseCamera.cs` | Follow camera with speed FOV, lean roll and wall avoidance. |
 | `Hud.cs` | Speed, boost meter, wheelie distance and best, and the touch-button overlay (IMGUI). |
-| `Mats.cs`, `Shapes.cs` | Material and primitive helpers. |
+| `Mats.cs`, `Shapes.cs` | Material factory (built-in Standard / URP Lit) and primitive helpers. |
